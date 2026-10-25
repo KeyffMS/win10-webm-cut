@@ -36,7 +36,7 @@ public static class FfmpegService
     public static async Task<VideoInfo> ProbeAsync(string input, CancellationToken cancellationToken)
     {
         string[] args = ["-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height:format=duration",
+            "-show_entries", "stream=width,height,duration:format=duration",
             "-of", "json", input];
         using var process = new Process { StartInfo = StartInfo("ffprobe", args) };
         process.Start();
@@ -53,7 +53,21 @@ public static class FfmpegService
         var video = streams[0];
         int width = video.GetProperty("width").GetInt32();
         int height = video.GetProperty("height").GetInt32();
-        double duration = root.GetProperty("format").GetProperty("duration").GetDouble();
+        // FFprobe serializuje wartości czasu jako JSON string, np. "12.345000".
+        static bool ReadDuration(JsonElement obj, out double value)
+        {
+            value = 0;
+            if (!obj.TryGetProperty("duration", out var el)) return false;
+            if (el.ValueKind == JsonValueKind.Number) return el.TryGetDouble(out value);
+            return el.ValueKind == JsonValueKind.String &&
+                   double.TryParse(el.GetString(), NumberStyles.Float,
+                       CultureInfo.InvariantCulture, out value);
+        }
+
+        double duration = 0;
+        if (!root.TryGetProperty("format", out var format) ||
+            !ReadDuration(format, out duration) || !double.IsFinite(duration) || duration <= 0)
+            ReadDuration(video, out duration);
         if (duration <= 0 || width <= 0 || height <= 0 || !double.IsFinite(duration))
             throw new InvalidOperationException("Niepoprawne metadane wideo.");
         return new VideoInfo(duration, width, height);
