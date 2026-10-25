@@ -19,8 +19,7 @@
       <Grid x:Name="PreviewHost" SizeChanged="PreviewHost_SizeChanged"
             MouseLeftButtonDown="Crop_MouseDown" MouseMove="Crop_MouseMove"
             MouseLeftButtonUp="Crop_MouseUp">
-        <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual"
-                      Stretch="Uniform" MediaOpened="Player_MediaOpened" MediaFailed="Player_MediaFailed"/>
+        <Image x:Name="PreviewFrame" Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="LowQuality" IsHitTestVisible="False"/>
         <Canvas x:Name="CropCanvas" IsHitTestVisible="False">
           <Rectangle x:Name="CropRect" Visibility="Collapsed" Stroke="#50C9FF" StrokeThickness="2"
                      Fill="#3050C9FF"/>
