@@ -23,6 +23,10 @@
         <Canvas x:Name="CropCanvas" IsHitTestVisible="False">
           <Rectangle x:Name="CropRect" Visibility="Collapsed" Stroke="#708BFF" StrokeThickness="3"
                      StrokeDashArray="5,2" Fill="#25708BFF"/>
+          <Rectangle x:Name="HandleTL" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleTR" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleBL" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleBR" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
         </Canvas>
         <Border x:Name="CropHint" HorizontalAlignment="Left" VerticalAlignment="Top"
                 Background="#D0202632" Margin="12" Padding="9,5" CornerRadius="4" Visibility="Collapsed"
