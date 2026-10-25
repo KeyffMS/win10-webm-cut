@@ -117,8 +117,14 @@ public partial class MainWindow : Window
 
     private void CancelPreview()
     {
-        _previewCancellation?.Cancel();
+        // Tylko wątek UI zarządza życiem CTS. Zadanie dekodujące nigdy go nie zwalnia.
+        var previous = _previewCancellation;
         _previewCancellation = null;
+        if (previous is not null)
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
     }
 
     private void PausePreview()
@@ -136,6 +142,7 @@ public partial class MainWindow : Window
         if (_info is null || _input is null) return;
         var request = new CancellationTokenSource();
         _previewCancellation = request;
+        CancellationToken token = request.Token; // Pobierz token PRZED uruchomieniem zadania.
         string path = _input;
         VideoInfo info = _info;
         double offset = Math.Clamp(_position, 0, Math.Max(0, info.Duration - 0.01));
@@ -148,13 +155,17 @@ public partial class MainWindow : Window
                 {
                     Dispatcher.BeginInvoke(() =>
                     {
-                        if (!ReferenceEquals(_previewCancellation, request) || request.IsCancellationRequested) return;
+                        if (!ReferenceEquals(_previewCancellation, request) || token.IsCancellationRequested) return;
                         PreviewFrame.Source = bitmap;
                         PreviewNote.Visibility = Visibility.Collapsed;
                     });
-                }, request.Token);
+                }, token);
             }
-            catch (Exception ex) when (!request.IsCancellationRequested)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // Anulowanie podglądu podczas przewijania jest normalne.
+            }
+            catch (Exception ex) when (!token.IsCancellationRequested)
             {
                 Dispatcher.BeginInvoke(() =>
                 {
@@ -163,10 +174,6 @@ public partial class MainWindow : Window
                     PreviewNote.Visibility = Visibility.Visible;
                     StatusLabel.Text = ex.Message;
                 });
-            }
-            finally
-            {
-                request.Dispose();
             }
         });
     }
