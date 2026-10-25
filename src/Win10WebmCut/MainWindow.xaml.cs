@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -18,6 +19,10 @@ public partial class MainWindow : Window
     private string? _input;
     private VideoInfo? _info;
     private bool _playing;
+    private double _position;
+    private double _playStart;
+    private readonly Stopwatch _playWatch = new();
+    private CancellationTokenSource? _previewCancellation;
     private bool _draggingSlider;
     private bool _selectingCrop;
     private Point _dragStart;
@@ -31,9 +36,17 @@ public partial class MainWindow : Window
         _timer.Tick += (_, _) =>
         {
             if (_info is null || _draggingSlider) return;
-            double seconds = Math.Clamp(Player.Position.TotalSeconds, 0, _info.Duration);
-            PositionSlider.Value = seconds;
-            TimeLabel.Text = $"{FormatTime(seconds)} / {FormatTime(_info.Duration)}";
+            if (_playing)
+            {
+                _position = Math.Clamp(_playStart + _playWatch.Elapsed.TotalSeconds, 0, _info.Duration);
+                if (_position >= _info.Duration)
+                {
+                    PausePreview();
+                    StartPreview();
+                }
+            }
+            PositionSlider.Value = _position;
+            TimeLabel.Text = $"{FormatTime(_position)} / {FormatTime(_info.Duration)}";
         };
         _timer.Start();
         Loaded += (_, _) => UpdateCropDisplay();
@@ -67,8 +80,11 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         try
         {
-            Player.Stop();
-            _playing = false;
+            PausePreview();
+            CancelPreview();
+            PreviewFrame.Source = null;
+            _position = 0;
+            _playStart = 0;
             PlayButton.Content = "▶ Odtwarzaj";
             _input = null;
             _info = null;
@@ -86,7 +102,7 @@ public partial class MainWindow : Window
             EndBox.Text = Number(info.Duration);
             PositionSlider.Maximum = info.Duration;
             PositionSlider.Value = 0;
-            Player.Source = new Uri(_input);
+            StartPreview();
             CropLabel.Text = "Cały obraz";
             UpdateCropDisplay();
             StatusLabel.Text = $"Wczytano: {FormatTime(info.Duration)}";
@@ -99,25 +115,79 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Player_MediaOpened(object sender, RoutedEventArgs e)
+    private void CancelPreview()
     {
-        PreviewNote.Visibility = Visibility.Collapsed;
-        UpdateCropDisplay();
+        _previewCancellation?.Cancel();
+        _previewCancellation = null;
     }
 
-    private void Player_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+    private void PausePreview()
     {
-        PreviewNote.Text = "Brak obsługi podglądu przez Windows MediaElement";
-        PreviewNote.Visibility = Visibility.Visible;
-        StatusLabel.Text = "FFmpeg nadal może wyeksportować plik.";
+        if (_playing && _info is not null)
+            _position = Math.Clamp(_playStart + _playWatch.Elapsed.TotalSeconds, 0, _info.Duration);
+        _playing = false;
+        _playWatch.Stop();
+        PlayButton.Content = "▶ Odtwarzaj";
+    }
+
+    private void StartPreview()
+    {
+        CancelPreview();
+        if (_info is null || _input is null) return;
+        var request = new CancellationTokenSource();
+        _previewCancellation = request;
+        string path = _input;
+        VideoInfo info = _info;
+        double offset = Math.Clamp(_position, 0, Math.Max(0, info.Duration - 0.01));
+        bool playing = _playing;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await PreviewDecoder.DecodeAsync(path, info, offset, playing, bitmap =>
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (!ReferenceEquals(_previewCancellation, request) || request.IsCancellationRequested) return;
+                        PreviewFrame.Source = bitmap;
+                        PreviewNote.Visibility = Visibility.Collapsed;
+                    });
+                }, request.Token);
+            }
+            catch (Exception ex) when (!request.IsCancellationRequested)
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (!ReferenceEquals(_previewCancellation, request)) return;
+                    PreviewNote.Text = "Błąd dekodowania podglądu przez FFmpeg";
+                    PreviewNote.Visibility = Visibility.Visible;
+                    StatusLabel.Text = ex.Message;
+                });
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        });
     }
 
     private void Play_Click(object sender, RoutedEventArgs e)
     {
         if (_info is null) return;
-        if (_playing) { Player.Pause(); _playing = false; }
-        else { Player.Play(); _playing = true; }
-        PlayButton.Content = _playing ? "⏸ Pauza" : "▶ Odtwarzaj";
+        if (_playing)
+        {
+            PausePreview();
+            StartPreview();
+        }
+        else
+        {
+            if (_position >= _info.Duration - 0.01) _position = 0;
+            _playing = true;
+            _playStart = _position;
+            _playWatch.Restart();
+            PlayButton.Content = "⏸ Pauza";
+            StartPreview();
+        }
     }
 
     private void Slider_MouseDown(object sender, MouseButtonEventArgs e) => _draggingSlider = true;
@@ -125,7 +195,14 @@ public partial class MainWindow : Window
     private void Slider_MouseUp(object sender, MouseButtonEventArgs e)
     {
         _draggingSlider = false;
-        if (_info is not null) Player.Position = TimeSpan.FromSeconds(PositionSlider.Value);
+        if (_info is null) return;
+        _position = PositionSlider.Value;
+        if (_playing)
+        {
+            _playStart = _position;
+            _playWatch.Restart();
+        }
+        StartPreview();
     }
 
     private void PositionSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -136,12 +213,12 @@ public partial class MainWindow : Window
 
     private void MarkStart_Click(object sender, RoutedEventArgs e)
     {
-        if (_info is not null) StartBox.Text = Number(Player.Position.TotalSeconds);
+        if (_info is not null) StartBox.Text = Number(_position);
     }
 
     private void MarkEnd_Click(object sender, RoutedEventArgs e)
     {
-        if (_info is not null) EndBox.Text = Number(Player.Position.TotalSeconds);
+        if (_info is not null) EndBox.Text = Number(_position);
     }
 
     private bool TryGetVideoBounds(out Rect rect)
@@ -292,9 +369,8 @@ public partial class MainWindow : Window
         ExportButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
         BusyProgress.Visibility = Visibility.Visible;
-        Player.Pause();
-        _playing = false;
-        PlayButton.Content = "▶ Odtwarzaj";
+        PausePreview();
+        StartPreview();
         var progress = new Progress<string>(line =>
         {
             if (line.Contains("time=") || line.Contains("Error", StringComparison.OrdinalIgnoreCase))
@@ -335,6 +411,6 @@ public partial class MainWindow : Window
     {
         _exportCancellation?.Cancel();
         _timer.Stop();
-        Player.Close();
+        CancelPreview();
     }
 }
