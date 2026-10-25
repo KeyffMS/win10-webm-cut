@@ -1,0 +1,78 @@
+<Window x:Class="Win10WebmCut.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Win10 WebM Cut" Width="1080" Height="760" MinWidth="780" MinHeight="580"
+        WindowStartupLocation="CenterScreen" Closing="Window_Closing">
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <DockPanel Grid.Row="0" Margin="0,0,0,12">
+      <Button Content="Otwórz wideo…" Click="Open_Click" DockPanel.Dock="Left"/>
+      <TextBlock x:Name="FileLabel" Text="Nie wybrano pliku" Margin="12,0" TextTrimming="CharacterEllipsis"/>
+    </DockPanel>
+    <Border Grid.Row="1" Background="Black" CornerRadius="6" ClipToBounds="True">
+      <Grid x:Name="PreviewHost" SizeChanged="PreviewHost_SizeChanged"
+            MouseLeftButtonDown="Crop_MouseDown" MouseMove="Crop_MouseMove"
+            MouseLeftButtonUp="Crop_MouseUp">
+        <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                      Stretch="Uniform" MediaOpened="Player_MediaOpened" MediaFailed="Player_MediaFailed"/>
+        <Canvas x:Name="CropCanvas" IsHitTestVisible="False">
+          <Rectangle x:Name="CropRect" Visibility="Collapsed" Stroke="#50C9FF" StrokeThickness="2"
+                     Fill="#3050C9FF"/>
+        </Canvas>
+        <TextBlock x:Name="PreviewNote" Text="Otwórz plik, aby rozpocząć" Foreground="#BAC4D9"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="17"
+                   IsHitTestVisible="False"/>
+      </Grid>
+    </Border>
+    <Border Grid.Row="2" Background="{StaticResource Panel}" CornerRadius="6" Margin="0,10,0,8" Padding="10">
+      <StackPanel>
+        <DockPanel>
+          <Button x:Name="PlayButton" Content="▶ Odtwarzaj" Click="Play_Click"/>
+          <Button Content="◀ Początek tutaj" Click="MarkStart_Click"/>
+          <Button Content="Koniec tutaj ▶" Click="MarkEnd_Click"/>
+          <TextBlock x:Name="TimeLabel" Text="00:00 / 00:00" HorizontalAlignment="Right" Margin="15,0,0,0"/>
+        </DockPanel>
+        <Slider x:Name="PositionSlider" Margin="5,8" Minimum="0" Maximum="1" ValueChanged="PositionSlider_ValueChanged"
+                PreviewMouseLeftButtonDown="Slider_MouseDown" PreviewMouseLeftButtonUp="Slider_MouseUp"/>
+        <UniformGrid Columns="4" Margin="4,4,4,0">
+          <TextBlock Text="Początek (sekundy)"/>
+          <TextBox x:Name="StartBox" Text="0"/>
+          <TextBlock Text="Koniec (sekundy)" Margin="12,0,0,0"/>
+          <TextBox x:Name="EndBox" Text="0"/>
+        </UniformGrid>
+      </StackPanel>
+    </Border>
+    <Border Grid.Row="3" Background="{StaticResource Panel}" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+      <StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+          <RadioButton x:Name="TrimMode" Content="1. Przycinanie czasu" IsChecked="True" Checked="Mode_Checked"/>
+          <RadioButton x:Name="CropMode" Content="2. Crop obrazu" Checked="Mode_Checked"/>
+          <Button Content="Reset crop" Click="ResetCrop_Click"/>
+          <TextBlock x:Name="CropLabel" Text="Cały obraz" Margin="10,0"/>
+        </StackPanel>
+        <DockPanel>
+          <TextBlock Text="Eksport:" Margin="0,0,8,0"/>
+          <ComboBox x:Name="ProfileBox" SelectionChanged="Profile_Changed" Width="310" SelectedIndex="0">
+            <ComboBoxItem Content="Bez rekompresji (oryginalny format)"/>
+            <ComboBoxItem Content="FFV1 MKV (bezstratne kodowanie)"/>
+            <ComboBoxItem Content="WebM VP9 (oryginalne wymiary)"/>
+            <ComboBoxItem Content="WebM VP9 (1/2 szerokości i wysokości)"/>
+            <ComboBoxItem Content="WebM VP9 (1/4 szerokości i wysokości)"/>
+          </ComboBox>
+          <Button x:Name="ExportButton" Content="Eksportuj…" Click="Export_Click" Margin="15,0,0,0"/>
+          <Button x:Name="CancelButton" Content="Anuluj" IsEnabled="False" Click="Cancel_Click"/>
+        </DockPanel>
+      </StackPanel>
+    </Border>
+    <DockPanel Grid.Row="4">
+      <TextBlock x:Name="StatusLabel" Text="Gotowe" DockPanel.Dock="Top" Margin="2,4"/>
+      <ProgressBar x:Name="BusyProgress" Height="4" IsIndeterminate="True" Visibility="Collapsed"/>
+    </DockPanel>
+  </Grid>
+</Window>
