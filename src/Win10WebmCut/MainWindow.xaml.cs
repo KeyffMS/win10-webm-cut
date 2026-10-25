@@ -284,7 +284,23 @@ public partial class MainWindow : Window
     private void Crop_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (CropMode.IsChecked != true || !TryGetVideoBounds(out Rect bounds)) return;
-        _dragStart = ClampPoint(e.GetPosition(PreviewHost), bounds);
+        Point cursor = ClampPoint(e.GetPosition(PreviewHost), bounds);
+        _dragStart = cursor;
+        // Blisko narożnika istniejącej ramki: przeciągaj ten narożnik.
+        if (_crop is not null && CropRect.Visibility == Visibility.Visible)
+        {
+            double left = Canvas.GetLeft(CropRect), top = Canvas.GetTop(CropRect);
+            double right = left + CropRect.Width, bottom = top + CropRect.Height;
+            const double hit = 13;
+            if (Math.Abs(cursor.X - left) < hit && Math.Abs(cursor.Y - top) < hit)
+                _dragStart = new Point(right, bottom);
+            else if (Math.Abs(cursor.X - right) < hit && Math.Abs(cursor.Y - top) < hit)
+                _dragStart = new Point(left, bottom);
+            else if (Math.Abs(cursor.X - left) < hit && Math.Abs(cursor.Y - bottom) < hit)
+                _dragStart = new Point(right, top);
+            else if (Math.Abs(cursor.X - right) < hit && Math.Abs(cursor.Y - bottom) < hit)
+                _dragStart = new Point(left, top);
+        }
         _selectingCrop = true;
         PreviewHost.CaptureMouse();
         CropRect.Visibility = Visibility.Visible;
@@ -326,6 +342,16 @@ public partial class MainWindow : Window
         Canvas.SetTop(CropRect, rect.Top);
         CropRect.Width = rect.Width;
         CropRect.Height = rect.Height;
+        void handle(System.Windows.Shapes.Rectangle shape, double x, double y)
+        {
+            Canvas.SetLeft(shape, x - 5);
+            Canvas.SetTop(shape, y - 5);
+            shape.Visibility = Visibility.Visible;
+        }
+        handle(HandleTL, rect.Left, rect.Top);
+        handle(HandleTR, rect.Right, rect.Top);
+        handle(HandleBL, rect.Left, rect.Bottom);
+        handle(HandleBR, rect.Right, rect.Bottom);
     }
 
     private void UpdateCropDisplay()
@@ -337,6 +363,7 @@ public partial class MainWindow : Window
             !TryGetVideoBounds(out Rect bounds))
         {
             CropRect.Visibility = Visibility.Collapsed;
+            HandleTL.Visibility = HandleTR.Visibility = HandleBL.Visibility = HandleBR.Visibility = Visibility.Collapsed;
             return;
         }
         var r = new Rect(bounds.Left + _crop.X * bounds.Width / _info.Width,
@@ -390,6 +417,7 @@ public partial class MainWindow : Window
     {
         _crop = null;
         CropRect.Visibility = Visibility.Collapsed;
+        HandleTL.Visibility = HandleTR.Visibility = HandleBL.Visibility = HandleBR.Visibility = Visibility.Collapsed;
         CropLabel.Text = "Cały obraz";
         if (CropMode?.IsChecked == true) InitCrop();
     }
