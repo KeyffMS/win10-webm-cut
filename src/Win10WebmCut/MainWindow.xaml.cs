@@ -139,9 +139,9 @@ public partial class MainWindow : Window
             PositionSlider.Maximum = info.Duration;
             PositionSlider.Value = 0;
             UpdateTimeDisplay(0);
+            CropLabel.Text = "Cały obraz";
             if (CropMode.IsChecked == true) InitCrop();
             StartPreview();
-            CropLabel.Text = "Cały obraz";
             UpdateCropDisplay();
             StatusLabel.Text = $"Wczytano: {FormatTime(info.Duration)}";
         }
