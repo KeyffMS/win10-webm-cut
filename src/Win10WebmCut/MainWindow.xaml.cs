@@ -46,7 +46,7 @@ public partial class MainWindow : Window
                 }
             }
             PositionSlider.Value = _position;
-            TimeLabel.Text = $"{FormatTime(_position)} / {FormatTime(_info.Duration)}";
+            UpdateTimeDisplay(_position);
         };
         _timer.Start();
         Loaded += (_, _) => UpdateCropDisplay();
@@ -66,6 +66,41 @@ public partial class MainWindow : Window
 
     private static string FormatTime(double seconds) =>
         TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss");
+
+    private static string Timecode(double seconds) =>
+        TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss\.fff");
+
+    private void UpdateTimeDisplay(double seconds)
+    {
+        if (_info is null) return;
+        TimeLabel.Text = $"{Timecode(seconds)} / {Timecode(_info.Duration)}";
+        if (_info.Fps > 0)
+        {
+            long index = Math.Max(0, (long)Math.Round(seconds * _info.Fps));
+            long total = Math.Max(1, (long)Math.Ceiling(_info.Duration * _info.Fps));
+            FrameLabel.Text = $"klatka: {Math.Min(index, total)} / {total}  ({_info.Fps:0.###} FPS)";
+        }
+        else FrameLabel.Text = "klatka: FPS nieznane";
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_info is null || e.Key is not (Key.Left or Key.Right)) return;
+        // Nie przechwytuj strzałek podczas edycji pól liczbowych i list wyboru.
+        if (Keyboard.FocusedElement is TextBox or ComboBox) return;
+        if (_draggingSlider) return;
+        if (_info.Fps <= 0) { StatusLabel.Text = "Nie można przewijać po klatkach: brak FPS w metadanych."; return; }
+        int direction = e.Key == Key.Right ? 1 : -1;
+        var modifiers = Keyboard.Modifiers;
+        double step = (modifiers & ModifierKeys.Control) != 0 ? 1.0 :
+                      (modifiers & ModifierKeys.Shift) != 0 ? 10.0 / _info.Fps : 1.0 / _info.Fps;
+        PausePreview();
+        _position = Math.Clamp(_position + direction * step, 0, _info.Duration);
+        PositionSlider.Value = _position;
+        UpdateTimeDisplay(_position);
+        StartPreview();
+        e.Handled = true;
+    }
 
     private static string Number(double value) =>
         value.ToString("0.###", CultureInfo.InvariantCulture);
@@ -89,6 +124,7 @@ public partial class MainWindow : Window
             _input = null;
             _info = null;
             _crop = null;
+            CropHint.Visibility = Visibility.Collapsed;
             CropRect.Visibility = Visibility.Collapsed;
             PreviewNote.Text = "Wczytywanie…";
             PreviewNote.Visibility = Visibility.Visible;
@@ -102,6 +138,8 @@ public partial class MainWindow : Window
             EndBox.Text = Number(info.Duration);
             PositionSlider.Maximum = info.Duration;
             PositionSlider.Value = 0;
+            UpdateTimeDisplay(0);
+            if (CropMode.IsChecked == true) InitCrop();
             StartPreview();
             CropLabel.Text = "Cały obraz";
             UpdateCropDisplay();
@@ -215,7 +253,7 @@ public partial class MainWindow : Window
     private void PositionSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_info is not null && _draggingSlider)
-            TimeLabel.Text = $"{FormatTime(PositionSlider.Value)} / {FormatTime(_info.Duration)}";
+            UpdateTimeDisplay(PositionSlider.Value);
     }
 
     private void MarkStart_Click(object sender, RoutedEventArgs e)
@@ -279,10 +317,7 @@ public partial class MainWindow : Window
         w -= w % 2;
         h -= h % 2;
         if (w < 2 || h < 2) { ResetCrop(); return; }
-        _crop = new CropArea(x, y, w, h);
-        CropLabel.Text = $"Crop: {w}×{h} @ {x},{y}";
-        if (ProfileBox.SelectedIndex == 0) ProfileBox.SelectedIndex = 1;
-        UpdateCropDisplay();
+        SetCrop(new CropArea(x, y, w, h));
     }
 
     private void DrawRectangle(Rect rect)
@@ -295,6 +330,7 @@ public partial class MainWindow : Window
 
     private void UpdateCropDisplay()
     {
+        if (CropCanvas is null || CropRect is null) return;
         CropCanvas.Width = PreviewHost.ActualWidth;
         CropCanvas.Height = PreviewHost.ActualHeight;
         if (_crop is null || _info is null || CropMode.IsChecked != true ||
@@ -313,20 +349,61 @@ public partial class MainWindow : Window
 
     private void ResetCrop_Click(object sender, RoutedEventArgs e) => ResetCrop();
 
+    private void InitCrop()
+    {
+        if (_info is null || _crop is not null) return;
+        int x = (_info.Width / 8) & ~1;
+        int y = (_info.Height / 8) & ~1;
+        int w = ((_info.Width - 2 * x) & ~1);
+        int h = ((_info.Height - 2 * y) & ~1);
+        SetCrop(new CropArea(x, y, w, h));
+    }
+
+    private void SetCrop(CropArea area)
+    {
+        _crop = area;
+        CropLabel.Text = $"Crop: {area.Width}×{area.Height} @ {area.X},{area.Y}";
+        CropX.Text = area.X.ToString(CultureInfo.InvariantCulture);
+        CropY.Text = area.Y.ToString(CultureInfo.InvariantCulture);
+        CropW.Text = area.Width.ToString(CultureInfo.InvariantCulture);
+        CropH.Text = area.Height.ToString(CultureInfo.InvariantCulture);
+        if (ProfileBox.SelectedIndex == 0) ProfileBox.SelectedIndex = 1;
+        UpdateCropDisplay();
+    }
+
+    private void ApplyCrop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_info is null) return;
+        if (!int.TryParse(CropX.Text, out int x) || !int.TryParse(CropY.Text, out int y) ||
+            !int.TryParse(CropW.Text, out int w) || !int.TryParse(CropH.Text, out int h) ||
+            x < 0 || y < 0 || w < 2 || h < 2 || x + (long)w > _info.Width || y + (long)h > _info.Height ||
+            (x | y | w | h) % 2 != 0)
+        {
+            MessageBox.Show(this, "X, Y, W, H muszą być parzyste, dodatnie i mieścić się w obrazie.",
+                "Nieprawidłowy crop", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        SetCrop(new CropArea(x, y, w, h));
+    }
+
     private void ResetCrop()
     {
         _crop = null;
         CropRect.Visibility = Visibility.Collapsed;
         CropLabel.Text = "Cały obraz";
+        if (CropMode?.IsChecked == true) InitCrop();
     }
 
     private void PreviewHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateCropDisplay();
 
     private void Mode_Checked(object sender, RoutedEventArgs e)
     {
-        if (CropRect is not null) UpdateCropDisplay();
-        if (ProfileBox is not null && CropMode?.IsChecked == true && ProfileBox.SelectedIndex == 0)
-            ProfileBox.SelectedIndex = 1;
+        if (CropSettings is null || CropHint is null || CropRect is null) return;
+        bool cropMode = CropMode?.IsChecked == true;
+        CropSettings.Visibility = cropMode ? Visibility.Visible : Visibility.Collapsed;
+        CropHint.Visibility = cropMode ? Visibility.Visible : Visibility.Collapsed;
+        if (cropMode) InitCrop();
+        UpdateCropDisplay();
     }
 
     private void Profile_Changed(object sender, SelectionChangedEventArgs e)
