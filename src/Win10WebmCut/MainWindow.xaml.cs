@@ -148,7 +148,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             PreviewNote.Text = "Nie udało się otworzyć pliku";
-            MessageBox.Show(this, ex.Message, "Błąd otwierania", MessageBoxButton.OK, MessageBoxImage.Error);
+            DarkDialog.Show(this, "Błąd otwierania", ex.Message, DarkDialog.Kind.Error);
             StatusLabel.Text = "Błąd";
         }
     }
@@ -406,8 +406,7 @@ public partial class MainWindow : Window
             x < 0 || y < 0 || w < 2 || h < 2 || x + (long)w > _info.Width || y + (long)h > _info.Height ||
             (x | y | w | h) % 2 != 0)
         {
-            MessageBox.Show(this, "X, Y, W, H muszą być parzyste, dodatnie i mieścić się w obrazie.",
-                "Nieprawidłowy crop", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialog.Show(this, "Nieprawidłowy crop", "X, Y, W, H muszą być parzyste, dodatnie i mieścić się w obrazie.", DarkDialog.Kind.Warning);
             return;
         }
         SetCrop(new CropArea(x, y, w, h));
@@ -448,7 +447,7 @@ public partial class MainWindow : Window
             !double.IsFinite(start) || !double.IsFinite(end) || start < 0 || end <= start ||
             end > _info.Duration + 0.001)
         {
-            MessageBox.Show(this, "Podaj poprawny zakres sekund (format: 12.5).", "Zakres", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DarkDialog.Show(this, "Zakres", "Podaj poprawny zakres sekund (format: 12.5).", DarkDialog.Kind.Warning);
             return;
         }
 
@@ -456,7 +455,7 @@ public partial class MainWindow : Window
         CropArea? crop = CropMode.IsChecked == true ? _crop : null;
         if (CropMode.IsChecked == true && crop is null)
         {
-            MessageBox.Show(this, "Zaznacz crop myszą na podglądzie.", "Crop", MessageBoxButton.OK, MessageBoxImage.Information);
+            DarkDialog.Show(this, "Crop", "Zaznacz crop myszą na podglądzie.", DarkDialog.Kind.Information);
             return;
         }
         string extension = profile switch
@@ -494,8 +493,7 @@ public partial class MainWindow : Window
             await FfmpegService.ExportAsync(_input, dlg.FileName, start, end, crop, profile, progress,
                 _exportCancellation.Token);
             StatusLabel.Text = "Zapisano: " + dlg.FileName;
-            MessageBox.Show(this, "Eksport zakończony:\n" + dlg.FileName, "Gotowe",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            DarkDialog.Show(this, "Eksport zakończony", "Zapisano plik:\n" + dlg.FileName, DarkDialog.Kind.Success);
         }
         catch (OperationCanceledException)
         {
@@ -505,7 +503,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             StatusLabel.Text = "Eksport nieudany";
-            MessageBox.Show(this, ex.Message, "Błąd eksportu", MessageBoxButton.OK, MessageBoxImage.Error);
+            DarkDialog.Show(this, "Błąd eksportu", ex.Message, DarkDialog.Kind.Error);
         }
         finally
         {
