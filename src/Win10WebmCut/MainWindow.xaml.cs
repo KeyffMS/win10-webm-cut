@@ -2,6 +2,8 @@ using Microsoft.Win32;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -25,6 +27,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => EnableDarkTitleBar();
         _timer.Tick += (_, _) =>
         {
             if (_info is null || _draggingSlider) return;
@@ -34,6 +37,18 @@ public partial class MainWindow : Window
         };
         _timer.Start();
         Loaded += (_, _) => UpdateCropDisplay();
+    }
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+    private void EnableDarkTitleBar()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        int enabled = 1;
+        // Windows 10 19045 (20H1+) oraz starszy identyfikator atrybutu DWM.
+        if (DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)) != 0)
+            DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
     }
 
     private static string FormatTime(double seconds) =>
