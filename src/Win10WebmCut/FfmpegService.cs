@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace Win10WebmCut;
 
-public sealed record VideoInfo(double Duration, int Width, int Height);
+public sealed record VideoInfo(double Duration, int Width, int Height, double Fps);
 public sealed record CropArea(int X, int Y, int Width, int Height);
 public enum ExportProfile { Copy, Ffv1, WebmFull, WebmHalf, WebmQuarter }
 
@@ -36,7 +36,7 @@ public static class FfmpegService
     public static async Task<VideoInfo> ProbeAsync(string input, CancellationToken cancellationToken)
     {
         string[] args = ["-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration:format=duration",
+            "-show_entries", "stream=width,height,duration,avg_frame_rate,r_frame_rate:format=duration",
             "-of", "json", input];
         using var process = new Process { StartInfo = StartInfo("ffprobe", args) };
         process.Start();
@@ -70,7 +70,21 @@ public static class FfmpegService
             ReadDuration(video, out duration);
         if (duration <= 0 || width <= 0 || height <= 0 || !double.IsFinite(duration))
             throw new InvalidOperationException("Niepoprawne metadane wideo.");
-        return new VideoInfo(duration, width, height);
+        static double Rate(JsonElement video, string name)
+        {
+            if (!video.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+                return 0;
+            var parts = (value.GetString() ?? "").Split('/');
+            if (parts.Length != 2 ||
+                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var numerator) ||
+                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var denominator) ||
+                denominator == 0) return 0;
+            return numerator / denominator;
+        }
+        double fps = Rate(video, "avg_frame_rate");
+        if (!double.IsFinite(fps) || fps <= 0) fps = Rate(video, "r_frame_rate");
+        if (!double.IsFinite(fps) || fps <= 0) fps = 0; // Brak stabilnej informacji o FPS.
+        return new VideoInfo(duration, width, height, fps);
     }
 
     public static async Task ExportAsync(string input, string output, double start, double end,
