@@ -30,7 +30,7 @@ dotnet publish src/Win10WebmCut/Win10WebmCut.csproj -c Release -r win-x64 --self
 FFmpeg nie jest dołączany automatycznie; jeśli dystrybuujesz binaria FFmpeg, dołącz ich licencje i wymagane informacje o pochodzeniu.
 
 ## Ograniczenia MVP
-- Podgląd WPF MediaElement korzysta z dekoderów systemowych; część plików obsługiwanych przez FFmpeg może nie być odtwarzana w podglądzie.
+- Podgląd korzysta z lokalnego FFmpeg: dekoduje obraz do 960 px i maksymalnie 12 klatek/s bez instalowania kodeków Windows. Podgląd jest bez dźwięku; eksport zachowuje audio zgodnie z wybranym profilem.
 - Crop jest wybierany na prostokątnym podglądzie; przy materiałach z nietypową orientacją/metadanymi wyświetlania rezultat może wymagać korekty.
 - Nie ma obsługi wielu segmentów ani zaawansowanego timeline.
 - Eksport VP9 używa `libvpx-vp9` i `libopus`; wymagany build FFmpeg z tymi enkoderami.
