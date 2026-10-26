@@ -41,3 +41,7 @@ WPF jest tylko GUI. `FfmpegService` uruchamia lokalne narzędzia FFmpeg/FFprobe 
 
 ## Licencja
 MIT — zobacz `LICENSE`.
+
+## Audyt statyczny
+
+[Audyt kodu, wydajności i pełnej dokumentacji — 2026-10-26](docs/audits/2026-10-26/README.md) obejmuje SPOT, SPOOA (z jawną definicją roboczą), DRY, KISS i clean code. Zawiera priorytety ustaleń, manifest audytowanej wersji oraz modele wykonane lokalnie w sandboxie. Symulacje nie są testami aplikacji ani benchmarkiem; przy przygotowaniu audytu nie uruchamiano GitHub Actions.
