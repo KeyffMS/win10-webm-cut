@@ -1,0 +1,81 @@
+{
+  "repository": "KeyffMS/win10-webm-cut",
+  "source_commit": "a124e98ea9171b2f24e2ea1555801fffd5634580",
+  "source_commit_time_utc": "2026-10-25T20:35:09Z",
+  "audit_date": "2026-10-26",
+  "source_of_hashes_and_sizes": "GitHub Git tree and pinned fetch_file reads; metadata, not locally recomputed hashes",
+  "file_count": 14,
+  "total_source_bytes": 59810,
+  "files": [
+    {
+      "path": ".github/workflows/build.yml",
+      "git_blob_sha": "e5d76e6dfd493ffb7dfa81b52374935260802b10",
+      "size_bytes": 773
+    },
+    {
+      "path": ".gitignore",
+      "git_blob_sha": "a2785a4969244d5e28311c2152f601f8fb6a277c",
+      "size_bytes": 39
+    },
+    {
+      "path": "LICENSE",
+      "git_blob_sha": "edf4b4d7ff9e04ef55c9dcfa8a444ec77429e447",
+      "size_bytes": 1063
+    },
+    {
+      "path": "README.md",
+      "git_blob_sha": "f1274c7c6903da388212a96e60124248d4bd4cd5",
+      "size_bytes": 2360
+    },
+    {
+      "path": "src/Win10WebmCut/App.xaml",
+      "git_blob_sha": "0832cf04d87f7b78f8d10af0b81d3c9e095784b3",
+      "size_bytes": 11277
+    },
+    {
+      "path": "src/Win10WebmCut/App.xaml.cs",
+      "git_blob_sha": "0c7290d6968556277bfc257b23b5569f0ee96833",
+      "size_bytes": 90
+    },
+    {
+      "path": "src/Win10WebmCut/DarkDialog.xaml",
+      "git_blob_sha": "7d84371ce940ca37948541a0cabd378021000c14",
+      "size_bytes": 2989
+    },
+    {
+      "path": "src/Win10WebmCut/DarkDialog.xaml.cs",
+      "git_blob_sha": "8890dec0c1907318e2dc1b6e4f0400444b2c4843",
+      "size_bytes": 1528
+    },
+    {
+      "path": "src/Win10WebmCut/FfmpegService.cs",
+      "git_blob_sha": "c0420326c2ede9ab2181431487f3ebdda3d226ee",
+      "size_bytes": 7332
+    },
+    {
+      "path": "src/Win10WebmCut/MainWindow.xaml",
+      "git_blob_sha": "b2ca9b245411e98b87e642df032438a38509a7e9",
+      "size_bytes": 6636
+    },
+    {
+      "path": "src/Win10WebmCut/MainWindow.xaml.cs",
+      "git_blob_sha": "97e791de081f87e9044f4bc6e74b16b4f72d7b41",
+      "size_bytes": 20961
+    },
+    {
+      "path": "src/Win10WebmCut/PreviewDecoder.cs",
+      "git_blob_sha": "62782512bae397fef6d4e35064e6b9d819d33cd9",
+      "size_bytes": 4006
+    },
+    {
+      "path": "src/Win10WebmCut/Win10WebmCut.csproj",
+      "git_blob_sha": "1894fc78e09cb979795f9dc8c1a84bf56d7580c1",
+      "size_bytes": 360
+    },
+    {
+      "path": "tools/README.md",
+      "git_blob_sha": "6da3ca2fa6716d0f1d3c41e0224fea3dbc788261",
+      "size_bytes": 396
+    }
+  ]
+}
