@@ -1,526 +1,357 @@
 using Microsoft.Win32;
 using System.ComponentModel;
-using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Threading;
+using System.Windows.Media.Imaging;
 
 namespace Win10WebmCut;
 
+/// <summary>View adapter: dialogs, controls and pointer gestures; no process or file cleanup ownership.</summary>
 public partial class MainWindow : Window
 {
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(180) };
-    private string? _input;
-    private VideoInfo? _info;
-    private bool _playing;
-    private double _position;
-    private double _playStart;
-    private readonly Stopwatch _playWatch = new();
-    private CancellationTokenSource? _previewCancellation;
-    private bool _draggingSlider;
-    private bool _selectingCrop;
-    private Point _dragStart;
-    private CropArea? _crop;
-    private CancellationTokenSource? _exportCancellation;
+    private readonly EditorController _editor;
+    private bool _updating;
+    private bool _scrubbing;
+    private bool _cropDragging;
+    private bool _allowClose;
+    private bool _closeInProgress;
+    private double _scrubOrigin;
+    private Point _cropAnchor;
+    private ViewRect? _rubberBand;
+    private string? _gestureSource;
+    private WriteableBitmap? _bitmap;
 
     public MainWindow()
     {
         InitializeComponent();
-        SourceInitialized += (_, _) => EnableDarkTitleBar();
-        _timer.Tick += (_, _) =>
+        _editor = new EditorController(Dispatcher);
+        _editor.Changed += Refresh;
+        _editor.Error += (title, detail) =>
         {
-            if (_info is null || _draggingSlider) return;
-            if (_playing)
-            {
-                _position = Math.Clamp(_playStart + _playWatch.Elapsed.TotalSeconds, 0, _info.Duration);
-                if (_position >= _info.Duration)
-                {
-                    PausePreview();
-                    StartPreview();
-                }
-            }
-            PositionSlider.Value = _position;
-            UpdateTimeDisplay(_position);
+            if (!_editor.IsClosing) DarkDialog.Show(this, title, detail, DarkDialog.Kind.Error);
         };
-        _timer.Start();
-        Loaded += (_, _) => UpdateCropDisplay();
+        _editor.FrameReady += frame =>
+        {
+            if (_bitmap is null || _bitmap.PixelWidth != frame.Size.Width || _bitmap.PixelHeight != frame.Size.Height)
+                _bitmap = new WriteableBitmap(frame.Size.Width, frame.Size.Height, 96, 96, PixelFormats.Bgra32, null);
+            _bitmap.WritePixels(new Int32Rect(0, 0, frame.Size.Width, frame.Size.Height), frame.Pixels, frame.Size.Stride, 0);
+            PreviewFrame.Source = _bitmap;
+        };
+        ProfileBox.ItemsSource = ExportProfiles.All;
+        SourceInitialized += (_, _) => EnableDarkTitleBar();
+        Loaded += (_, _) =>
+        {
+            Width = Math.Max(MinWidth, Math.Min(Width, SystemParameters.WorkArea.Width - 24));
+            Height = Math.Max(MinHeight, Math.Min(Height, SystemParameters.WorkArea.Height - 24));
+            UpdateViewport(); Refresh(); OpenButton.Focus();
+        };
+        Refresh();
     }
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
-
     private void EnableDarkTitleBar()
     {
-        var hwnd = new WindowInteropHelper(this).Handle;
         int enabled = 1;
-        // Windows 10 19045 (20H1+) oraz starszy identyfikator atrybutu DWM.
-        if (DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)) != 0)
-            DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
+        nint handle = new WindowInteropHelper(this).Handle;
+        if (DwmSetWindowAttribute(handle, 20, ref enabled, sizeof(int)) != 0)
+            DwmSetWindowAttribute(handle, 19, ref enabled, sizeof(int));
     }
 
-    private static string FormatTime(double seconds) =>
-        TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss");
-
-    private static string Timecode(double seconds) =>
-        TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss\.fff");
-
-    private void UpdateTimeDisplay(double seconds)
+    private void Refresh()
     {
-        if (_info is null) return;
-        TimeLabel.Text = $"{Timecode(seconds)} / {Timecode(_info.Duration)}";
-        if (_info.Fps > 0)
+        if (_editor is null || _updating) return;
+        _updating = true;
+        try
         {
-            long index = Math.Max(0, (long)Math.Round(seconds * _info.Fps));
-            long total = Math.Max(1, (long)Math.Ceiling(_info.Duration * _info.Fps));
-            FrameLabel.Text = $"klatka: {Math.Min(index, total)} / {total}  ({_info.Fps:0.###} FPS)";
+            VideoInfo? source = _editor.Source;
+            if ((_scrubbing || _cropDragging) && (!_editor.CanEdit || source?.FullPath != _gestureSource)) CancelGestures();
+            OpenButton.IsEnabled = _editor.CanOpen;
+            PlayButton.IsEnabled = _editor.CanPreview;
+            PlayButton.Content = _editor.Phase == EditorPhase.Playing ? "⏸ Pauza" : "▶ Odtwarzaj";
+            MarkStartButton.IsEnabled = MarkEndButton.IsEnabled = _editor.CanMark;
+            PositionSlider.IsEnabled = _editor.CanPreview;
+            PositionSlider.Maximum = source?.Duration ?? 1;
+            if (!_scrubbing) PositionSlider.Value = _editor.Position.Pending ? _editor.Position.Requested : _editor.Position.Presented ?? 0;
+            StartBox.IsEnabled = EndBox.IsEnabled = _editor.CanEdit;
+            if (StartBox.Text != _editor.StartText) StartBox.Text = _editor.StartText;
+            if (EndBox.Text != _editor.EndText) EndBox.Text = _editor.EndText;
+            FileLabel.Text = source is null ? "Nie wybrano pliku" : $"{Path.GetFileName(source.FullPath)}  ({source.Width}×{source.Height})";
+            FileLabel.ToolTip = source?.FullPath;
+            string imageTime = _editor.Position.Presented is { } shown ? TimePolicy.Timecode(shown) : "—";
+            TimeLabel.Text = source is null ? "— / —" : $"obraz: {imageTime} / {TimePolicy.Timecode(source.Duration)}";
+            FrameLabel.Text = source is not null && _editor.Position.Presented is { } current
+                ? TimePolicy.FrameLabel(current, source.Duration, source.Fps) : "klatka: —";
+            WantedLabel.Text = _editor.Position.Pending ? "Żądano: " + TimePolicy.Timecode(_editor.Position.Requested) : "";
+            StartFrameLabel.Text = source is not null && TimePolicy.TrySeconds(_editor.StartText, out double start) && start >= 0 && start <= source.Duration
+                ? TimePolicy.FrameLabel(start, source.Duration, source.Fps) : "granica początku: —";
+            EndFrameLabel.Text = source is not null && TimePolicy.TrySeconds(_editor.EndText, out double end) && end >= 0 && end <= source.Duration + TimePolicy.EndTolerance
+                ? TimePolicy.FrameLabel(Math.Min(end, source.Duration), source.Duration, source.Fps, endBoundary: true) : "granica końca: —";
+            bool cropMode = _editor.Mode == EditingMode.Crop;
+            TrimMode.IsChecked = !cropMode; CropMode.IsChecked = cropMode;
+            TrimMode.IsEnabled = CropMode.IsEnabled = _editor.CanEdit || _editor.Phase == EditorPhase.Empty;
+            CropSettings.Visibility = cropMode ? Visibility.Visible : Visibility.Collapsed;
+            CropHint.Visibility = cropMode && _editor.CanPreview ? Visibility.Visible : Visibility.Collapsed;
+            PreviewHost.Cursor = cropMode ? Cursors.Cross : Cursors.Arrow;
+            CropEditor? crop = _editor.Crop;
+            CropLabel.Text = crop?.Applied is { } area
+                ? $"{area.Width}×{area.Height} @ {area.X},{area.Y}" + (cropMode ? "" : " — pomijany w trybie czasu") : "Cały obraz";
+            CropX.IsEnabled = CropY.IsEnabled = CropW.IsEnabled = CropH.IsEnabled = _editor.CanEdit && crop is not null;
+            if (crop is not null)
+            {
+                if (CropX.Text != crop.Draft.X) CropX.Text = crop.Draft.X;
+                if (CropY.Text != crop.Draft.Y) CropY.Text = crop.Draft.Y;
+                if (CropW.Text != crop.Draft.Width) CropW.Text = crop.Draft.Width;
+                if (CropH.Text != crop.Draft.Height) CropH.Text = crop.Draft.Height;
+            }
+            else { CropX.Text = CropY.Text = CropW.Text = CropH.Text = ""; }
+            ApplyCropButton.IsEnabled = DiscardCropButton.IsEnabled = _editor.CanEdit && crop?.IsDirty == true;
+            ResetCropButton.IsEnabled = CentralCropButton.IsEnabled = _editor.CanEdit && crop is not null;
+            CropStateLabel.Text = crop?.IsDirty == true
+                ? "Niezastosowane zmiany. Ramka pokazuje zatwierdzony kadr; eksport jest zablokowany do Zastosuj/Odrzuć."
+                : "X/Y/W/H: piksele po obrocie, przed korekcją SAR. X/Y mogą wynosić 0. Cały obraz usuwa crop.";
+            CropStateLabel.Foreground = (Brush)FindResource(crop?.IsDirty == true ? "Warning" : "TextSecondary");
+            ProfileBox.IsEnabled = _editor.CanEdit || _editor.Phase == EditorPhase.Empty;
+            ProfileBox.SelectedItem = _editor.Profile;
+            ProfileBox.ToolTip = _editor.Profile.Name;
+            ExportButton.IsEnabled = _editor.CanExport;
+            CancelButton.IsEnabled = _editor.Phase == EditorPhase.Exporting;
+            BusyProgress.IsIndeterminate = _editor.Phase == EditorPhase.Exporting;
+            BusyProgress.Visibility = BusyProgress.IsIndeterminate ? Visibility.Visible : Visibility.Collapsed;
+            PreviewNote.Text = _editor.PreviewMessage;
+            PreviewNote.Visibility = string.IsNullOrEmpty(_editor.PreviewMessage) ? Visibility.Collapsed : Visibility.Visible;
+            StatusLabel.Text = _editor.Status; StatusLabel.ToolTip = _editor.Status;
+            DrawCrop();
         }
-        else FrameLabel.Text = "klatka: FPS nieznane";
+        finally { _updating = false; }
     }
+
+    private void ShowError(string title, Exception ex)
+    {
+        AppLog.Write("ui-operation", ex.ToString());
+        if (!_editor.IsClosing)
+            DarkDialog.Show(this, title, ex.Message, ex is ArgumentException or InvalidOperationException ? DarkDialog.Kind.Warning : DarkDialog.Kind.Error);
+        Refresh();
+    }
+    private void Safely(Action action, string title)
+    {
+        try { action(); }
+        catch (Exception ex) { ShowError(title, ex); }
+    }
+    private void Open_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_editor.CanOpen) return;
+        try
+        {
+            var dialog = new OpenFileDialog { Filter = "Wideo|*.mp4;*.mkv;*.mov;*.avi;*.webm;*.m4v;*.ts;*.mts;*.m2ts;*.wmv;*.mpg|Wszystkie pliki|*.*", CheckFileExists = true };
+            if (dialog.ShowDialog(this) != true) return;
+            if (_editor.Crop?.IsDirty == true && !DarkDialog.Confirm(this, "Niezastosowany crop", "Otworzenie nowego pliku odrzuci niezastosowane pola X/Y/W/H. Kontynuować?")) return;
+            CancelGestures(); _bitmap = null; PreviewFrame.Source = null;
+            _editor.Open(dialog.FileName);
+        }
+        catch (Exception ex) { ShowError("Otwieranie", ex); }
+    }
+    private async void Play_Click(object sender, RoutedEventArgs e)
+    {
+        try { await _editor.TogglePlaybackAsync(); }
+        catch (Exception ex) { ShowError("Odtwarzanie", ex); }
+    }
+    private void MarkStart_Click(object sender, RoutedEventArgs e) => Safely(() => _editor.Mark(end: false), "Początek");
+    private void MarkEnd_Click(object sender, RoutedEventArgs e) => Safely(() => _editor.Mark(end: true), "Koniec");
+    private void Range_TextChanged(object sender, TextChangedEventArgs e)
+    { if (!_updating && _editor is not null) _editor.Range(StartBox.Text, EndBox.Text); }
+    private void Mode_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_updating || _editor is null) return;
+        CancelGestures();
+        Safely(() => _editor.SelectMode(CropMode.IsChecked == true ? EditingMode.Crop : EditingMode.Trim), "Tryb edycji");
+    }
+    private void Profile_Changed(object sender, SelectionChangedEventArgs e)
+    { if (!_updating && _editor is not null && ProfileBox.SelectedItem is ExportProfile profile) Safely(() => _editor.SelectProfile(profile), "Profil eksportu"); }
+    private void CropField_Changed(object sender, TextChangedEventArgs e)
+    { if (!_updating && _editor is not null) _editor.EditCrop(new(CropX.Text, CropY.Text, CropW.Text, CropH.Text)); }
+    private void ApplyCrop_Click(object sender, RoutedEventArgs e) => Safely(_editor.ApplyCrop, "Crop");
+    private void DiscardCrop_Click(object sender, RoutedEventArgs e) => Safely(_editor.DiscardCropDraft, "Crop");
+    private void ResetCrop_Click(object sender, RoutedEventArgs e) => Safely(_editor.FullImage, "Crop");
+    private void CentralCrop_Click(object sender, RoutedEventArgs e) => Safely(_editor.CentralCrop, "Crop");
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (_info is null || e.Key is not (Key.Left or Key.Right)) return;
-        // Nie przechwytuj strzałek podczas edycji pól liczbowych i list wyboru.
-        if (Keyboard.FocusedElement is TextBox or ComboBox) return;
-        if (_draggingSlider) return;
-        if (_info.Fps <= 0) { StatusLabel.Text = "Nie można przewijać po klatkach: brak FPS w metadanych."; return; }
-        int direction = e.Key == Key.Right ? 1 : -1;
-        var modifiers = Keyboard.Modifiers;
-        double step = (modifiers & ModifierKeys.Control) != 0 ? 1.0 :
-                      (modifiers & ModifierKeys.Shift) != 0 ? 10.0 / _info.Fps : 1.0 / _info.Fps;
-        PausePreview();
-        _position = Math.Clamp(_position + direction * step, 0, _info.Duration);
-        PositionSlider.Value = _position;
-        UpdateTimeDisplay(_position);
-        StartPreview();
-        e.Handled = true;
-    }
-
-    private static string Number(double value) =>
-        value.ToString("0.###", CultureInfo.InvariantCulture);
-
-    private async void Open_Click(object sender, RoutedEventArgs e)
-    {
-        if (_exportCancellation is not null) return;
-        var dlg = new OpenFileDialog
+        if (_editor is null || _editor.IsClosing) return;
+        if (e.Key == Key.Escape && (_cropDragging || _scrubbing))
         {
-            Filter = "Wideo|*.mp4;*.mkv;*.mov;*.avi;*.webm;*.m4v;*.ts;*.mts;*.wmv|Wszystkie pliki|*.*"
-        };
-        if (dlg.ShowDialog(this) != true) return;
+            bool seekBack = _scrubbing;
+            CancelGestures();
+            if (seekBack) _editor.Seek(_scrubOrigin);
+            e.Handled = true; return;
+        }
+        if (e.Key is not (Key.Left or Key.Right) || !_editor.CanPreview || _cropDragging || _scrubbing) return;
+        if (Keyboard.FocusedElement is TextBoxBase or ComboBox or ComboBoxItem) return;
+        ModifierKeys modifiers = Keyboard.Modifiers;
+        if ((modifiers & (ModifierKeys.Alt | ModifierKeys.Windows)) != 0) return;
+        e.Handled = true;
+        Safely(() => _editor.Step(e.Key == Key.Right ? 1 : -1,
+            (modifiers & ModifierKeys.Shift) != 0, (modifiers & ModifierKeys.Control) != 0), "Nawigacja");
+    }
+    private async void Slider_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_updating || !_editor.CanPreview) return;
+        _scrubbing = true; _scrubOrigin = _editor.Position.NavigationOrigin; _gestureSource = _editor.Source?.FullPath;
+        try { await _editor.PauseAsync(); }
+        catch (Exception ex) { CancelGestures(); ShowError("Przewijanie", ex); }
+    }
+    private void PositionSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    { if (_scrubbing && !_updating && _editor is not null) Safely(() => _editor.Seek(e.NewValue), "Przewijanie"); }
+    private void FinishScrub()
+    {
+        if (!_scrubbing) return;
+        _scrubbing = false;
+        if (_gestureSource == _editor.Source?.FullPath) Safely(() => _editor.Seek(PositionSlider.Value), "Przewijanie");
+        Refresh();
+    }
+    private void Slider_MouseUp(object sender, MouseButtonEventArgs e) => FinishScrub();
+    private void Slider_LostMouseCapture(object sender, MouseEventArgs e) => FinishScrub();
+
+    private void UpdateViewport()
+    {
+        if (_editor is null || PreviewHost is null) return;
+        DpiScale dpi = VisualTreeHelper.GetDpi(PreviewHost);
+        _editor.SetViewport(new(PreviewHost.ActualWidth, PreviewHost.ActualHeight, dpi.DpiScaleX, dpi.DpiScaleY));
+    }
+    private void PreviewHost_SizeChanged(object sender, SizeChangedEventArgs e)
+    { UpdateViewport(); if (_editor is not null) { CancelCropGesture(); DrawCrop(); } }
+    private bool Bounds(out ViewRect bounds)
+    {
+        bounds = default;
+        if (_editor.Crop is null || _editor.DisplayedSize is not { } size) return false;
+        bounds = VideoGeometry.ImageBounds(size, PreviewHost.ActualWidth, PreviewHost.ActualHeight);
+        return bounds.Width > 0 && bounds.Height > 0;
+    }
+    private static Point ClampPoint(Point point, ViewRect bounds) =>
+        new(Math.Clamp(point.X, bounds.X, bounds.Right), Math.Clamp(point.Y, bounds.Y, bounds.Bottom));
+    private static ViewRect Between(Point a, Point b) => new(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+
+    private async void Crop_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        PreviewHost.Focus();
+        if (_editor.Mode != EditingMode.Crop || !_editor.CanPreview || !Bounds(out ViewRect bounds)) return;
         try
         {
-            PausePreview();
-            CancelPreview();
-            PreviewFrame.Source = null;
-            _position = 0;
-            _playStart = 0;
-            PlayButton.Content = "▶ Odtwarzaj";
-            _input = null;
-            _info = null;
-            _crop = null;
-            CropHint.Visibility = Visibility.Collapsed;
-            CropRect.Visibility = Visibility.Collapsed;
-            PreviewNote.Text = "Wczytywanie…";
-            PreviewNote.Visibility = Visibility.Visible;
-            StatusLabel.Text = "Odczyt metadanych FFprobe…";
-            var info = await FfmpegService.ProbeAsync(dlg.FileName, CancellationToken.None);
-            _input = dlg.FileName;
-            _info = info;
-            FileLabel.Text = Path.GetFileName(_input) + $"  ({info.Width}×{info.Height})";
-            FileLabel.ToolTip = _input;
-            StartBox.Text = "0";
-            EndBox.Text = Number(info.Duration);
-            PositionSlider.Maximum = info.Duration;
-            PositionSlider.Value = 0;
-            UpdateTimeDisplay(0);
-            CropLabel.Text = "Cały obraz";
-            if (CropMode.IsChecked == true) InitCrop();
-            StartPreview();
-            UpdateCropDisplay();
-            StatusLabel.Text = $"Wczytano: {FormatTime(info.Duration)}";
+            if (_editor.Crop!.IsDirty) throw new InvalidOperationException("Zastosuj lub odrzuć zmiany pól przed rysowaniem nowego kadru.");
+            Point point = e.GetPosition(PreviewHost);
+            if (point.X < bounds.X || point.X > bounds.Right || point.Y < bounds.Y || point.Y > bounds.Bottom) return;
+            Task pause = _editor.PauseAsync();
+            ViewRect old = _editor.Crop.Geometry.ToView(_editor.Crop.Applied, bounds);
+            _cropAnchor = point;
+            const double hitRadius = 13;
+            bool Near(double x, double y) => Math.Abs(point.X - x) <= hitRadius && Math.Abs(point.Y - y) <= hitRadius;
+            if (Near(old.X, old.Y)) _cropAnchor = new Point(old.Right, old.Bottom);
+            else if (Near(old.Right, old.Y)) _cropAnchor = new Point(old.X, old.Bottom);
+            else if (Near(old.X, old.Bottom)) _cropAnchor = new Point(old.Right, old.Y);
+            else if (Near(old.Right, old.Bottom)) _cropAnchor = new Point(old.X, old.Y);
+            _cropDragging = true; _gestureSource = _editor.Source?.FullPath;
+            _rubberBand = Between(_cropAnchor, point);
+            PreviewHost.CaptureMouse(); DrawCrop(); e.Handled = true;
+            await pause;
         }
-        catch (Exception ex)
-        {
-            PreviewNote.Text = "Nie udało się otworzyć pliku";
-            DarkDialog.Show(this, "Błąd otwierania", ex.Message, DarkDialog.Kind.Error);
-            StatusLabel.Text = "Błąd";
-        }
+        catch (Exception ex) { CancelCropGesture(); ShowError("Crop", ex); }
     }
-
-    private void CancelPreview()
-    {
-        // Tylko wątek UI zarządza życiem CTS. Zadanie dekodujące nigdy go nie zwalnia.
-        var previous = _previewCancellation;
-        _previewCancellation = null;
-        if (previous is not null)
-        {
-            previous.Cancel();
-            previous.Dispose();
-        }
-    }
-
-    private void PausePreview()
-    {
-        if (_playing && _info is not null)
-            _position = Math.Clamp(_playStart + _playWatch.Elapsed.TotalSeconds, 0, _info.Duration);
-        _playing = false;
-        _playWatch.Stop();
-        PlayButton.Content = "▶ Odtwarzaj";
-    }
-
-    private void StartPreview()
-    {
-        CancelPreview();
-        if (_info is null || _input is null) return;
-        var request = new CancellationTokenSource();
-        _previewCancellation = request;
-        CancellationToken token = request.Token; // Pobierz token PRZED uruchomieniem zadania.
-        string path = _input;
-        VideoInfo info = _info;
-        double offset = Math.Clamp(_position, 0, Math.Max(0, info.Duration - 0.01));
-        bool playing = _playing;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await PreviewDecoder.DecodeAsync(path, info, offset, playing, bitmap =>
-                {
-                    Dispatcher.BeginInvoke(() =>
-                    {
-                        if (!ReferenceEquals(_previewCancellation, request) || token.IsCancellationRequested) return;
-                        PreviewFrame.Source = bitmap;
-                        PreviewNote.Visibility = Visibility.Collapsed;
-                    });
-                }, token);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                // Anulowanie podglądu podczas przewijania jest normalne.
-            }
-            catch (Exception ex) when (!token.IsCancellationRequested)
-            {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    if (!ReferenceEquals(_previewCancellation, request)) return;
-                    PreviewNote.Text = "Błąd dekodowania podglądu przez FFmpeg";
-                    PreviewNote.Visibility = Visibility.Visible;
-                    StatusLabel.Text = ex.Message;
-                });
-            }
-        });
-    }
-
-    private void Play_Click(object sender, RoutedEventArgs e)
-    {
-        if (_info is null) return;
-        if (_playing)
-        {
-            PausePreview();
-            StartPreview();
-        }
-        else
-        {
-            if (_position >= _info.Duration - 0.01) _position = 0;
-            _playing = true;
-            _playStart = _position;
-            _playWatch.Restart();
-            PlayButton.Content = "⏸ Pauza";
-            StartPreview();
-        }
-    }
-
-    private void Slider_MouseDown(object sender, MouseButtonEventArgs e) => _draggingSlider = true;
-
-    private void Slider_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _draggingSlider = false;
-        if (_info is null) return;
-        _position = PositionSlider.Value;
-        if (_playing)
-        {
-            _playStart = _position;
-            _playWatch.Restart();
-        }
-        StartPreview();
-    }
-
-    private void PositionSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_info is not null && _draggingSlider)
-            UpdateTimeDisplay(PositionSlider.Value);
-    }
-
-    private void MarkStart_Click(object sender, RoutedEventArgs e)
-    {
-        if (_info is not null) StartBox.Text = Number(_position);
-    }
-
-    private void MarkEnd_Click(object sender, RoutedEventArgs e)
-    {
-        if (_info is not null) EndBox.Text = Number(_position);
-    }
-
-    private bool TryGetVideoBounds(out Rect rect)
-    {
-        rect = Rect.Empty;
-        if (_info is null || PreviewHost.ActualWidth <= 0 || PreviewHost.ActualHeight <= 0) return false;
-        double scale = Math.Min(PreviewHost.ActualWidth / _info.Width, PreviewHost.ActualHeight / _info.Height);
-        double width = _info.Width * scale;
-        double height = _info.Height * scale;
-        rect = new Rect((PreviewHost.ActualWidth - width) / 2,
-                        (PreviewHost.ActualHeight - height) / 2, width, height);
-        return true;
-    }
-
-    private static Point ClampPoint(Point p, Rect rect) =>
-        new(Math.Clamp(p.X, rect.Left, rect.Right), Math.Clamp(p.Y, rect.Top, rect.Bottom));
-
-    private void Crop_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (CropMode.IsChecked != true || !TryGetVideoBounds(out Rect bounds)) return;
-        Point cursor = ClampPoint(e.GetPosition(PreviewHost), bounds);
-        _dragStart = cursor;
-        // Blisko narożnika istniejącej ramki: przeciągaj ten narożnik.
-        if (_crop is not null && CropRect.Visibility == Visibility.Visible)
-        {
-            double left = Canvas.GetLeft(CropRect), top = Canvas.GetTop(CropRect);
-            double right = left + CropRect.Width, bottom = top + CropRect.Height;
-            const double hit = 13;
-            if (Math.Abs(cursor.X - left) < hit && Math.Abs(cursor.Y - top) < hit)
-                _dragStart = new Point(right, bottom);
-            else if (Math.Abs(cursor.X - right) < hit && Math.Abs(cursor.Y - top) < hit)
-                _dragStart = new Point(left, bottom);
-            else if (Math.Abs(cursor.X - left) < hit && Math.Abs(cursor.Y - bottom) < hit)
-                _dragStart = new Point(right, top);
-            else if (Math.Abs(cursor.X - right) < hit && Math.Abs(cursor.Y - bottom) < hit)
-                _dragStart = new Point(left, top);
-        }
-        _selectingCrop = true;
-        PreviewHost.CaptureMouse();
-        CropRect.Visibility = Visibility.Visible;
-    }
-
     private void Crop_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_selectingCrop || !TryGetVideoBounds(out Rect bounds)) return;
-        Point p = ClampPoint(e.GetPosition(PreviewHost), bounds);
-        DrawRectangle(new Rect(_dragStart, p));
+        if (!_cropDragging) return;
+        if (e.LeftButton != MouseButtonState.Pressed || !Bounds(out ViewRect bounds)) { CancelCropGesture(); return; }
+        _rubberBand = Between(_cropAnchor, ClampPoint(e.GetPosition(PreviewHost), bounds));
+        DrawCrop();
     }
-
     private void Crop_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_selectingCrop || _info is null || !TryGetVideoBounds(out Rect bounds)) return;
-        _selectingCrop = false;
-        PreviewHost.ReleaseMouseCapture();
-        Point p = ClampPoint(e.GetPosition(PreviewHost), bounds);
-        Rect selection = new(_dragStart, p);
-        if (selection.Width < 8 || selection.Height < 8) { ResetCrop(); return; }
-
-        double sx = _info.Width / bounds.Width;
-        double sy = _info.Height / bounds.Height;
-        int x = Math.Clamp((int)Math.Floor((selection.Left - bounds.Left) * sx), 0, _info.Width - 2);
-        int y = Math.Clamp((int)Math.Floor((selection.Top - bounds.Top) * sy), 0, _info.Height - 2);
-        x -= x % 2;
-        y -= y % 2;
-        int w = Math.Min(_info.Width - x, (int)Math.Floor(selection.Width * sx));
-        int h = Math.Min(_info.Height - y, (int)Math.Floor(selection.Height * sy));
-        w -= w % 2;
-        h -= h % 2;
-        if (w < 2 || h < 2) { ResetCrop(); return; }
-        SetCrop(new CropArea(x, y, w, h));
+        if (!_cropDragging || !Bounds(out ViewRect bounds)) { CancelCropGesture(); return; }
+        ViewRect selection = Between(_cropAnchor, ClampPoint(e.GetPosition(PreviewHost), bounds));
+        _cropDragging = false; _rubberBand = null; PreviewHost.ReleaseMouseCapture();
+        if (selection.Width >= 4 && selection.Height >= 4 && _gestureSource == _editor.Source?.FullPath)
+            Safely(() => _editor.SetCrop(_editor.Crop!.Geometry.FromView(selection, bounds)), "Crop");
+        DrawCrop(); e.Handled = true;
     }
-
-    private void DrawRectangle(Rect rect)
+    private void Crop_LostMouseCapture(object sender, MouseEventArgs e) => CancelCropGesture();
+    private void CancelCropGesture()
     {
-        Canvas.SetLeft(CropRect, rect.Left);
-        Canvas.SetTop(CropRect, rect.Top);
-        CropRect.Width = rect.Width;
-        CropRect.Height = rect.Height;
-        void handle(System.Windows.Shapes.Rectangle shape, double x, double y)
-        {
-            Canvas.SetLeft(shape, x - 5);
-            Canvas.SetTop(shape, y - 5);
-            shape.Visibility = Visibility.Visible;
-        }
-        handle(HandleTL, rect.Left, rect.Top);
-        handle(HandleTR, rect.Right, rect.Top);
-        handle(HandleBL, rect.Left, rect.Bottom);
-        handle(HandleBR, rect.Right, rect.Bottom);
+        bool captured = _cropDragging;
+        _cropDragging = false; _rubberBand = null;
+        if (captured && PreviewHost.IsMouseCaptureWithin) PreviewHost.ReleaseMouseCapture();
+        if (_editor is not null) DrawCrop();
     }
-
-    private void UpdateCropDisplay()
+    private void CancelGestures()
     {
-        if (CropCanvas is null || CropRect is null) return;
-        CropCanvas.Width = PreviewHost.ActualWidth;
-        CropCanvas.Height = PreviewHost.ActualHeight;
-        if (_crop is null || _info is null || CropMode.IsChecked != true ||
-            !TryGetVideoBounds(out Rect bounds))
-        {
-            CropRect.Visibility = Visibility.Collapsed;
-            HandleTL.Visibility = HandleTR.Visibility = HandleBL.Visibility = HandleBR.Visibility = Visibility.Collapsed;
-            return;
-        }
-        var r = new Rect(bounds.Left + _crop.X * bounds.Width / _info.Width,
-                         bounds.Top + _crop.Y * bounds.Height / _info.Height,
-                         _crop.Width * bounds.Width / _info.Width,
-                         _crop.Height * bounds.Height / _info.Height);
-        DrawRectangle(r);
-        CropRect.Visibility = Visibility.Visible;
+        _scrubbing = false;
+        if (PositionSlider.IsMouseCaptureWithin) Mouse.Capture(null);
+        CancelCropGesture();
     }
-
-    private void ResetCrop_Click(object sender, RoutedEventArgs e) => ResetCrop();
-
-    private void InitCrop()
+    private void DrawCrop()
     {
-        if (_info is null || _crop is not null) return;
-        int x = (_info.Width / 8) & ~1;
-        int y = (_info.Height / 8) & ~1;
-        int w = ((_info.Width - 2 * x) & ~1);
-        int h = ((_info.Height - 2 * y) & ~1);
-        SetCrop(new CropArea(x, y, w, h));
-    }
-
-    private void SetCrop(CropArea area)
-    {
-        _crop = area;
-        CropLabel.Text = $"Crop: {area.Width}×{area.Height} @ {area.X},{area.Y}";
-        CropX.Text = area.X.ToString(CultureInfo.InvariantCulture);
-        CropY.Text = area.Y.ToString(CultureInfo.InvariantCulture);
-        CropW.Text = area.Width.ToString(CultureInfo.InvariantCulture);
-        CropH.Text = area.Height.ToString(CultureInfo.InvariantCulture);
-        if (ProfileBox.SelectedIndex == 0) ProfileBox.SelectedIndex = 1;
-        UpdateCropDisplay();
-    }
-
-    private void ApplyCrop_Click(object sender, RoutedEventArgs e)
-    {
-        if (_info is null) return;
-        if (!int.TryParse(CropX.Text, out int x) || !int.TryParse(CropY.Text, out int y) ||
-            !int.TryParse(CropW.Text, out int w) || !int.TryParse(CropH.Text, out int h) ||
-            x < 0 || y < 0 || w < 2 || h < 2 || x + (long)w > _info.Width || y + (long)h > _info.Height ||
-            (x | y | w | h) % 2 != 0)
-        {
-            DarkDialog.Show(this, "Nieprawidłowy crop", "X, Y, W, H muszą być parzyste, dodatnie i mieścić się w obrazie.", DarkDialog.Kind.Warning);
-            return;
-        }
-        SetCrop(new CropArea(x, y, w, h));
-    }
-
-    private void ResetCrop()
-    {
-        _crop = null;
-        CropRect.Visibility = Visibility.Collapsed;
-        HandleTL.Visibility = HandleTR.Visibility = HandleBL.Visibility = HandleBR.Visibility = Visibility.Collapsed;
-        CropLabel.Text = "Cały obraz";
-        if (CropMode?.IsChecked == true) InitCrop();
-    }
-
-    private void PreviewHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateCropDisplay();
-
-    private void Mode_Checked(object sender, RoutedEventArgs e)
-    {
-        if (CropSettings is null || CropHint is null || CropRect is null) return;
-        bool cropMode = CropMode?.IsChecked == true;
-        CropSettings.Visibility = cropMode ? Visibility.Visible : Visibility.Collapsed;
-        CropHint.Visibility = cropMode ? Visibility.Visible : Visibility.Collapsed;
-        if (cropMode) InitCrop();
-        UpdateCropDisplay();
-    }
-
-    private void Profile_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (ProfileBox is not null && CropMode?.IsChecked == true && ProfileBox.SelectedIndex == 0)
-            ProfileBox.SelectedIndex = 1;
+        if (_editor is null || CropRect is null) return;
+        bool visible = _editor.Mode == EditingMode.Crop && _editor.Crop is not null && Bounds(out _);
+        var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        CropRect.Visibility = HandleTL.Visibility = HandleTR.Visibility = HandleBL.Visibility = HandleBR.Visibility = visibility;
+        if (!visible || !Bounds(out ViewRect bounds)) return;
+        ViewRect rect = _rubberBand ?? _editor.Crop!.Geometry.ToView(_editor.Crop.Applied, bounds);
+        Canvas.SetLeft(CropRect, rect.X); Canvas.SetTop(CropRect, rect.Y); CropRect.Width = rect.Width; CropRect.Height = rect.Height;
+        void Handle(FrameworkElement handle, double x, double y) { Canvas.SetLeft(handle, x - 5); Canvas.SetTop(handle, y - 5); }
+        Handle(HandleTL, rect.X, rect.Y); Handle(HandleTR, rect.Right, rect.Y);
+        Handle(HandleBL, rect.X, rect.Bottom); Handle(HandleBR, rect.Right, rect.Bottom);
     }
 
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        if (_input is null || _info is null || _exportCancellation is not null) return;
-        if (!double.TryParse(StartBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double start) ||
-            !double.TryParse(EndBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double end) ||
-            !double.IsFinite(start) || !double.IsFinite(end) || start < 0 || end <= start ||
-            end > _info.Duration + 0.001)
-        {
-            DarkDialog.Show(this, "Zakres", "Podaj poprawny zakres sekund (format: 12.5).", DarkDialog.Kind.Warning);
-            return;
-        }
-
-        var profile = (ExportProfile)ProfileBox.SelectedIndex;
-        CropArea? crop = CropMode.IsChecked == true ? _crop : null;
-        if (CropMode.IsChecked == true && crop is null)
-        {
-            DarkDialog.Show(this, "Crop", "Zaznacz crop myszą na podglądzie.", DarkDialog.Kind.Information);
-            return;
-        }
-        string extension = profile switch
-        {
-            ExportProfile.Ffv1 => ".mkv",
-            ExportProfile.Copy => Path.GetExtension(_input),
-            _ => ".webm"
-        };
-        if (string.IsNullOrWhiteSpace(extension)) extension = ".mkv";
-        var dlg = new SaveFileDialog
-        {
-            FileName = Path.GetFileNameWithoutExtension(_input) + "_cut" + extension,
-            DefaultExt = extension,
-            Filter = profile == ExportProfile.Copy ? "Plik wideo|*" + extension :
-                     profile == ExportProfile.Ffv1 ? "Matroska|*.mkv" : "WebM|*.webm",
-            AddExtension = true,
-            OverwritePrompt = true
-        };
-        if (dlg.ShowDialog(this) != true) return;
-
-        _exportCancellation = new CancellationTokenSource();
-        ExportButton.IsEnabled = false;
-        CancelButton.IsEnabled = true;
-        BusyProgress.Visibility = Visibility.Visible;
-        PausePreview();
-        StartPreview();
-        var progress = new Progress<string>(line =>
-        {
-            if (line.Contains("time=") || line.Contains("Error", StringComparison.OrdinalIgnoreCase))
-                StatusLabel.Text = line.Trim();
-        });
         try
         {
-            StatusLabel.Text = "Eksport trwa…";
-            await FfmpegService.ExportAsync(_input, dlg.FileName, start, end, crop, profile, progress,
-                _exportCancellation.Token);
-            StatusLabel.Text = "Zapisano: " + dlg.FileName;
-            DarkDialog.Show(this, "Eksport zakończony", "Zapisano plik:\n" + dlg.FileName, DarkDialog.Kind.Success);
+            ExportRequest snapshot = _editor.CreateExportSnapshot(); // Before either modal dialog.
+            ExportPlan plan = ExportValidation.Plan(snapshot);
+            if (!DarkDialog.Confirm(this, "Kontrakt eksportu", string.Join("\n\n", plan.Notices))) return;
+            string extension = snapshot.Profile.OutputExtension(snapshot.Source.FullPath);
+            var dialog = new SaveFileDialog
+            {
+                FileName = Path.GetFileNameWithoutExtension(snapshot.Source.FullPath) + "_cut" + extension,
+                InitialDirectory = Path.GetDirectoryName(snapshot.Source.FullPath), DefaultExt = extension,
+                Filter = $"Wynik {extension}|*{extension}", AddExtension = true, CheckPathExists = true, OverwritePrompt = false
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            bool allowOverwrite = File.Exists(dialog.FileName);
+            if (allowOverwrite && !DarkDialog.Confirm(this, "Zastąpić istniejący wynik?",
+                "Poprzedni plik pozostanie do czasu ukończenia eksportu i zatwierdzenia nowego wyniku.\n\n" + dialog.FileName)) return;
+            CancelGestures();
+            ExportOutcome outcome = await _editor.ExportAsync(snapshot, dialog.FileName, allowOverwrite);
+            if (outcome == ExportOutcome.Saved && !_editor.IsClosing)
+                DarkDialog.Show(this, "Eksport zakończony", "Zapisano plik:\n" + dialog.FileName, DarkDialog.Kind.Success);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) { ShowError("Eksport", ex); }
+    }
+    private void Cancel_Click(object sender, RoutedEventArgs e) => _editor.CancelExport();
+    private void Diagnostics_Click(object sender, RoutedEventArgs e) =>
+        DarkDialog.Show(this, "Diagnostyka lokalna", AppLog.Summary() + "\n\nOstatni status:\n" + _editor.Status);
+    private async void Window_Closing(object sender, CancelEventArgs e)
+    {
+        if (_allowClose) return;
+        e.Cancel = true;
+        if (_closeInProgress) return;
+        _closeInProgress = true;
+        CancelGestures();
+        try
         {
-            StatusLabel.Text = "Eksport anulowany";
-            try { File.Delete(dlg.FileName); } catch { }
+            await _editor.DisposeAsync();
+            if (ToolProcess.IsBlocked)
+                DarkDialog.Show(this, "Zamykanie procesu", "Nie potwierdzono zakończenia jednego z procesów narzędzi. Sprawdź PID w lokalnym logu. Nie uruchomiono kolejnych operacji.", DarkDialog.Kind.Warning);
         }
-        catch (Exception ex)
-        {
-            StatusLabel.Text = "Eksport nieudany";
-            DarkDialog.Show(this, "Błąd eksportu", ex.Message, DarkDialog.Kind.Error);
-        }
+        catch (Exception ex) { AppLog.Write("close", ex.ToString()); }
         finally
         {
-            _exportCancellation.Dispose();
-            _exportCancellation = null;
-            ExportButton.IsEnabled = true;
-            CancelButton.IsEnabled = false;
-            BusyProgress.Visibility = Visibility.Collapsed;
+            PreviewFrame.Source = null; _bitmap = null;
+            _allowClose = true; Close();
         }
-    }
-
-    private void Cancel_Click(object sender, RoutedEventArgs e) => _exportCancellation?.Cancel();
-
-    private void Window_Closing(object sender, CancelEventArgs e)
-    {
-        _exportCancellation?.Cancel();
-        _timer.Stop();
-        CancelPreview();
     }
 }

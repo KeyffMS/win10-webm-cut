@@ -1,151 +1,78 @@
-using System.Diagnostics;
-using System.Globalization;
 using System.IO;
-using System.Text;
-using System.Text.Json;
 
 namespace Win10WebmCut;
 
-public sealed record VideoInfo(double Duration, int Width, int Height, double Fps);
-public sealed record CropArea(int X, int Y, int Width, int Height);
-public enum ExportProfile { Copy, Ffv1, WebmFull, WebmHalf, WebmQuarter }
-
 public static class FfmpegService
 {
-    private static string Tool(string name)
+    public static Task<VideoInfo> ProbeAsync(string input, CancellationToken token) => MediaProbe.ReadAsync(input, token);
+
+    public static async Task ExportAsync(ExportRequest snapshot, string output, bool allowOverwrite,
+        IProgress<string>? progress, CancellationToken token)
     {
-        string local = Path.Combine(AppContext.BaseDirectory, "tools", name + ".exe");
-        return File.Exists(local) ? local : name;
+        using var activity = AppLog.BeginOperation("export");
+        ExportPlan plan = ExportValidation.Plan(snapshot);
+        ExportRequest request = plan.Request;
+        string expectedExtension = request.Profile.OutputExtension(request.Source.FullPath);
+        if (!Path.GetExtension(output).Equals(expectedExtension, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException($"Ten profil zapisuje plik {expectedExtension}.");
+        if (FileRevision.Read(request.Source.FullPath) != request.Source.Stamp)
+            throw new IOException("Źródło zmieniło się od odczytu metadanych. Otwórz je ponownie.");
+        await ExportTransaction.WriteAsync(request.Source.FullPath, output, allowOverwrite, async (temporary, ct) =>
+        {
+            progress?.Report("Sprawdzanie narzędzi i możliwości profilu…");
+            ToolCapabilities capabilities = await ToolCapabilities.ReadAsync(ct).ConfigureAwait(false);
+            capabilities.Require(plan);
+            progress?.Report("Eksport do pliku roboczego…");
+            string[] args = Arguments(plan, temporary);
+            DateTime nextUpdate = DateTime.MinValue;
+            await ToolProcess.RunAsync("ffmpeg", args, (stream, readToken) => stream.CopyToAsync(Stream.Null, readToken),
+                ct, errorLine: line =>
+                {
+                    if ((line.Contains("time=", StringComparison.Ordinal) || line.Contains("Error", StringComparison.OrdinalIgnoreCase)) &&
+                        DateTime.UtcNow >= nextUpdate)
+                    { nextUpdate = DateTime.UtcNow.AddMilliseconds(200); progress?.Report(line); }
+                }).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            progress?.Report("Sprawdzanie metadanych wyniku przed zatwierdzeniem…");
+            VideoInfo result = await MediaProbe.ReadAsync(temporary, ct).ConfigureAwait(false);
+            if (result.Width != plan.Width || result.Height != plan.Height)
+                throw new InvalidDataException("Wymiary wyniku różnią się od planu eksportu. Poprzedni plik pozostawiono bez zmian.");
+            if (FileRevision.Read(request.Source.FullPath) != request.Source.Stamp)
+                throw new IOException("Źródło zmieniło się podczas eksportu. Wynik nie został zatwierdzony.");
+        }, token).ConfigureAwait(false);
     }
 
-    private static ProcessStartInfo StartInfo(string executable, IEnumerable<string> arguments)
+    private static string[] Arguments(ExportPlan plan, string output)
     {
-        var psi = new ProcessStartInfo(Tool(executable))
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        foreach (string argument in arguments) psi.ArgumentList.Add(argument);
-        return psi;
-    }
-
-    public static async Task<VideoInfo> ProbeAsync(string input, CancellationToken cancellationToken)
-    {
-        string[] args = ["-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration,avg_frame_rate,r_frame_rate:format=duration",
-            "-of", "json", input];
-        using var process = new Process { StartInfo = StartInfo("ffprobe", args) };
-        process.Start();
-        Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        string json = await stdout;
-        string error = await stderr;
-        if (process.ExitCode != 0) throw new InvalidOperationException("ffprobe: " + error);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var streams = root.GetProperty("streams");
-        if (streams.GetArrayLength() == 0) throw new InvalidOperationException("Nie znaleziono strumienia wideo.");
-        var video = streams[0];
-        int width = video.GetProperty("width").GetInt32();
-        int height = video.GetProperty("height").GetInt32();
-        // FFprobe serializuje wartości czasu jako JSON string, np. "12.345000".
-        static bool ReadDuration(JsonElement obj, out double value)
-        {
-            value = 0;
-            if (!obj.TryGetProperty("duration", out var el)) return false;
-            if (el.ValueKind == JsonValueKind.Number) return el.TryGetDouble(out value);
-            return el.ValueKind == JsonValueKind.String &&
-                   double.TryParse(el.GetString(), NumberStyles.Float,
-                       CultureInfo.InvariantCulture, out value);
-        }
-
-        double duration = 0;
-        if (!root.TryGetProperty("format", out var format) ||
-            !ReadDuration(format, out duration) || !double.IsFinite(duration) || duration <= 0)
-            ReadDuration(video, out duration);
-        if (duration <= 0 || width <= 0 || height <= 0 || !double.IsFinite(duration))
-            throw new InvalidOperationException("Niepoprawne metadane wideo.");
-        static double Rate(JsonElement video, string name)
-        {
-            if (!video.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
-                return 0;
-            var parts = (value.GetString() ?? "").Split('/');
-            if (parts.Length != 2 ||
-                !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var numerator) ||
-                !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var denominator) ||
-                denominator == 0) return 0;
-            return numerator / denominator;
-        }
-        double fps = Rate(video, "avg_frame_rate");
-        if (!double.IsFinite(fps) || fps <= 0) fps = Rate(video, "r_frame_rate");
-        if (!double.IsFinite(fps) || fps <= 0) fps = 0; // Brak stabilnej informacji o FPS.
-        return new VideoInfo(duration, width, height, fps);
-    }
-
-    public static async Task ExportAsync(string input, string output, double start, double end,
-        CropArea? crop, ExportProfile profile, IProgress<string>? progress, CancellationToken token)
-    {
-        if (end <= start || start < 0) throw new ArgumentException("Nieprawidłowy zakres czasu.");
-        if (profile == ExportProfile.Copy && crop is not null)
-            throw new ArgumentException("Crop wymaga ponownego kodowania.");
-        if (Path.GetFullPath(input).Equals(Path.GetFullPath(output), StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Plik wynikowy musi być inny niż wejściowy.");
-
-        string sec(double d) => d.ToString("0.######", CultureInfo.InvariantCulture);
-        var args = new List<string> { "-hide_banner", "-y", "-ss", sec(start), "-i", input, "-t", sec(end - start) };
-        if (profile == ExportProfile.Copy)
-        {
-            args.AddRange(["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"]);
-        }
+        ExportRequest request = plan.Request;
+        ExportProfile profile = request.Profile;
+        var args = new List<string> { "-hide_banner", "-nostdin", "-y", "-ss", TimePolicy.Number(request.Start), "-noautorotate" };
+        // Override the input matrix only when explicitly normalizing pixels. Copy retains metadata.
+        if (profile.Id != ExportProfileId.Copy)
+            args.AddRange([$"-display_rotation:{request.Source.Video.Index}", "0"]);
+        args.AddRange(["-i", request.Source.FullPath, "-t", TimePolicy.Number(request.End - request.Start)]);
+        if (profile.Id == ExportProfileId.Copy) args.AddRange(["-map", "0", "-map_metadata", "0", "-map_chapters", "0"]);
         else
         {
-            args.AddRange(["-map", "0:v:0", "-map", "0:a?", "-sn", "-dn"]);
-            var filters = new List<string>();
-            if (crop is not null)
-                filters.Add($"crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}");
-            if (profile is ExportProfile.WebmHalf or ExportProfile.WebmQuarter)
+            args.AddRange(["-map", $"0:{request.Source.Video.Index}", "-map", "0:a?", "-sn", "-dn",
+                "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1", "-metadata:s:v:0", "rotate=0"]);
+            var filters = VideoGeometry.From(request.Source).Filters().ToList();
+            if (request.Crop is { } crop) filters.Add($"crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}");
+            if (profile.IsWebm && profile.ScaleDivisor != 1) filters.Add($"scale={plan.Width}:{plan.Height}:flags=lanczos");
+            args.AddRange(["-vf", string.Join(',', filters)]);
+            void Color(string option, string value)
             {
-                int divisor = profile == ExportProfile.WebmHalf ? 2 : 4;
-                filters.Add($"scale=trunc(iw/{divisor}/2)*2:trunc(ih/{divisor}/2)*2:flags=lanczos");
+                if (!string.IsNullOrWhiteSpace(value) && value is not ("unknown" or "unspecified" or "reserved"))
+                    args.AddRange([option, value]);
             }
-            if (filters.Count > 0) args.AddRange(["-vf", string.Join(",", filters)]);
-            if (profile == ExportProfile.Ffv1)
-                args.AddRange(["-c:v", "ffv1", "-level", "3", "-c:a", "flac"]);
-            else
-                args.AddRange(["-c:v", "libvpx-vp9", "-deadline", "good", "-cpu-used", "4",
-                    "-crf", "32", "-b:v", "0", "-row-mt", "1", "-c:a", "libopus", "-b:a", "96k"]);
+            StreamInfo video = request.Source.Video;
+            Color("-color_primaries", video.ColorPrimaries); Color("-color_trc", video.ColorTransfer);
+            Color("-colorspace", video.ColorSpace); Color("-color_range", video.ColorRange);
         }
-        args.Add(output);
-
-        using var process = new Process { StartInfo = StartInfo("ffmpeg", args) };
-        process.Start();
-        try
-        {
-            Task<string> stdout = process.StandardOutput.ReadToEndAsync(token);
-            var lastLines = new Queue<string>();
-            Task consumeErrors = Task.Run(async () =>
-            {
-                while (await process.StandardError.ReadLineAsync(token) is { } line)
-                {
-                    progress?.Report(line);
-                    lastLines.Enqueue(line);
-                    if (lastLines.Count > 18) lastLines.Dequeue();
-                }
-            }, token);
-            await Task.WhenAll(process.WaitForExitAsync(token), stdout, consumeErrors);
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException("Błąd FFmpeg:\n" + string.Join("\n", lastLines));
-        }
-        catch
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
-            throw;
-        }
+        args.AddRange(profile.CodecArguments);
+        if (profile.Id == ExportProfileId.Ffv1)
+            args.AddRange(["-pix_fmt", "+" + request.Source.Video.PixelFormat]); // Reject implicit format conversion.
+        args.AddRange(["-f", plan.Muxer, output]);
+        return args.ToArray();
     }
 }

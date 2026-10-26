@@ -1,99 +1,100 @@
 <Window x:Class="Win10WebmCut.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Win10 WebM Cut" Background="{StaticResource WindowBackground}" Foreground="{StaticResource TextPrimary}" FontFamily="Segoe UI" FontSize="13" Width="1080" Height="760" MinWidth="780" MinHeight="580"
+        Title="Win10 WebM Cut" Width="1100" Height="820" MinWidth="640" MinHeight="480"
+        Background="{StaticResource WindowBackground}" Foreground="{StaticResource TextPrimary}" FontFamily="Segoe UI" FontSize="13"
         WindowStartupLocation="CenterScreen" Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
-  <Grid Margin="16">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
-    </Grid.RowDefinitions>
-    <DockPanel Grid.Row="0" Margin="0,0,0,12">
-      <Button Content="Otwórz wideo…" Click="Open_Click" DockPanel.Dock="Left"/>
-      <TextBlock x:Name="FileLabel" Text="Nie wybrano pliku" Margin="12,0" TextTrimming="CharacterEllipsis"/>
-    </DockPanel>
-    <Border Grid.Row="1" Background="Black" CornerRadius="6" ClipToBounds="True">
-      <Grid x:Name="PreviewHost" Background="Transparent" Cursor="Cross" SizeChanged="PreviewHost_SizeChanged"
-            MouseLeftButtonDown="Crop_MouseDown" MouseMove="Crop_MouseMove"
-            MouseLeftButtonUp="Crop_MouseUp">
+  <Grid Margin="14">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="*" MaxHeight="370"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Grid Margin="0,0,0,10">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Button x:Name="OpenButton" Content="Otwórz wideo…" Click="Open_Click"/>
+      <TextBlock x:Name="FileLabel" Grid.Column="1" Text="Nie wybrano pliku" Margin="12,0" TextTrimming="CharacterEllipsis"/>
+      <Button Grid.Column="2" Content="Diagnostyka" Click="Diagnostics_Click"/>
+    </Grid>
+    <Border Grid.Row="1" Background="{StaticResource PreviewBackground}" CornerRadius="6" ClipToBounds="True" MinHeight="100">
+      <Grid x:Name="PreviewHost" Background="Transparent" Focusable="True" SizeChanged="PreviewHost_SizeChanged"
+            MouseLeftButtonDown="Crop_MouseDown" MouseMove="Crop_MouseMove" MouseLeftButtonUp="Crop_MouseUp" LostMouseCapture="Crop_LostMouseCapture"
+            AutomationProperties.Name="Podgląd wideo i zaznaczenie kadru">
         <Image x:Name="PreviewFrame" Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="LowQuality" IsHitTestVisible="False"/>
         <Canvas x:Name="CropCanvas" IsHitTestVisible="False">
-          <Rectangle x:Name="CropRect" Visibility="Collapsed" Stroke="#708BFF" StrokeThickness="3"
-                     StrokeDashArray="5,2" Fill="#25708BFF"/>
-          <Rectangle x:Name="HandleTL" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
-          <Rectangle x:Name="HandleTR" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
-          <Rectangle x:Name="HandleBL" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
-          <Rectangle x:Name="HandleBR" Width="10" Height="10" Fill="#EFF3FA" Stroke="#708BFF" StrokeThickness="1" Visibility="Collapsed"/>
+          <Rectangle x:Name="CropRect" Visibility="Collapsed" Stroke="{StaticResource Accent}" StrokeThickness="2" StrokeDashArray="5,2" Fill="{StaticResource CropFill}"/>
+          <Rectangle x:Name="HandleTL" Width="10" Height="10" Fill="{StaticResource TextPrimary}" Stroke="{StaticResource Accent}" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleTR" Width="10" Height="10" Fill="{StaticResource TextPrimary}" Stroke="{StaticResource Accent}" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleBL" Width="10" Height="10" Fill="{StaticResource TextPrimary}" Stroke="{StaticResource Accent}" Visibility="Collapsed"/>
+          <Rectangle x:Name="HandleBR" Width="10" Height="10" Fill="{StaticResource TextPrimary}" Stroke="{StaticResource Accent}" Visibility="Collapsed"/>
         </Canvas>
-        <Border x:Name="CropHint" HorizontalAlignment="Left" VerticalAlignment="Top"
-                Background="#D0202632" Margin="12" Padding="9,5" CornerRadius="4" Visibility="Collapsed"
-                IsHitTestVisible="False">
-          <TextBlock Text="CROP — przeciągnij myszą lub wpisz X / Y / W / H" Foreground="#EAF0FF"/>
+        <Border x:Name="CropHint" HorizontalAlignment="Left" VerticalAlignment="Top" Background="{StaticResource OverlayBackground}"
+                Margin="10" Padding="9,5" CornerRadius="4" Visibility="Collapsed" IsHitTestVisible="False">
+          <TextBlock Text="CROP — narysuj ramkę, przeciągnij narożnik lub wpisz X/Y/W/H" TextWrapping="Wrap"/>
         </Border>
-        <TextBlock x:Name="PreviewNote" Text="Otwórz plik, aby rozpocząć" Foreground="#BAC4D9"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="17"
-                   IsHitTestVisible="False"/>
+        <TextBlock x:Name="PreviewNote" Text="Otwórz plik, aby rozpocząć" Foreground="{StaticResource TextSecondary}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20" TextWrapping="Wrap" TextAlignment="Center" FontSize="16" IsHitTestVisible="False"/>
       </Grid>
     </Border>
-    <Border Grid.Row="2" Background="{StaticResource Panel}" CornerRadius="6" Margin="0,10,0,8" Padding="10">
+    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="370" Margin="0,10,0,0">
       <StackPanel>
-        <DockPanel>
-          <Button x:Name="PlayButton" Content="▶ Odtwarzaj" Click="Play_Click"/>
-          <Button Content="◀ Początek tutaj" Click="MarkStart_Click"/>
-          <Button Content="Koniec tutaj ▶" Click="MarkEnd_Click"/>
-          <TextBlock x:Name="TimeLabel" Text="00:00:00.000 / 00:00:00.000" HorizontalAlignment="Right" Margin="15,0,0,0"/>
-          <TextBlock x:Name="FrameLabel" Text="klatka: — / —" Foreground="{StaticResource TextSecondary}" Margin="14,0,0,0"/>
-        </DockPanel>
-        <Slider x:Name="PositionSlider" Margin="5,8" Minimum="0" Maximum="1" ValueChanged="PositionSlider_ValueChanged"
-                PreviewMouseLeftButtonDown="Slider_MouseDown" PreviewMouseLeftButtonUp="Slider_MouseUp"/>
-        <TextBlock Text="← / →: 1 klatka     Shift + ← / →: 10 klatek     Ctrl + ← / →: 1 sekunda" Margin="6,3,0,8" Foreground="{StaticResource TextSecondary}"/>
-        <UniformGrid Columns="4" Margin="4,4,4,0">
-          <TextBlock Text="Początek (sekundy)"/>
-          <TextBox x:Name="StartBox" Text="0"/>
-          <TextBlock Text="Koniec (sekundy)" Margin="12,0,0,0"/>
-          <TextBox x:Name="EndBox" Text="0"/>
-        </UniformGrid>
+        <Border Background="{StaticResource Panel}" CornerRadius="6" Padding="9" Margin="0,0,0,8">
+          <StackPanel>
+            <WrapPanel>
+              <Button x:Name="PlayButton" Content="▶ Odtwarzaj" Click="Play_Click"/>
+              <Button x:Name="MarkStartButton" Content="Początek tutaj" Click="MarkStart_Click" ToolTip="Początek zakresu z czasu wyświetlonego obrazu."/>
+              <Button x:Name="MarkEndButton" Content="Koniec przed tą klatką" Click="MarkEnd_Click" ToolTip="Koniec jest granicą wyłączną: [początek, koniec)."/>
+              <TextBlock x:Name="TimeLabel" Text="— / —" Margin="12,4"/>
+            </WrapPanel>
+            <WrapPanel Margin="5,2">
+              <TextBlock x:Name="FrameLabel" Text="klatka: —" Foreground="{StaticResource TextSecondary}" Margin="0,0,15,0"/>
+              <TextBlock x:Name="WantedLabel" Foreground="{StaticResource Warning}"/>
+            </WrapPanel>
+            <Slider x:Name="PositionSlider" Minimum="0" Maximum="1" Margin="4,5" IsMoveToPointEnabled="True"
+                    ValueChanged="PositionSlider_ValueChanged" PreviewMouseLeftButtonDown="Slider_MouseDown" PreviewMouseLeftButtonUp="Slider_MouseUp"
+                    LostMouseCapture="Slider_LostMouseCapture" AutomationProperties.Name="Pozycja żądana w sekundach"/>
+            <TextBlock Text="← / →: ≈1 klatka   ·   Shift + ← / →: ≈10 klatek   ·   Ctrl + ← / →: 1 s   ·   FPS nie jest indeksem VFR"
+                       Margin="5,0,5,7" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel Margin="4,0,10,0">
+                <WrapPanel><TextBlock Text="Początek (s)" Margin="0,0,8,0"/><TextBox x:Name="StartBox" Width="120" Text="0" TextChanged="Range_TextChanged" AutomationProperties.Name="Początek w sekundach"/></WrapPanel>
+                <TextBlock x:Name="StartFrameLabel" Margin="0,4,0,0" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Margin="4,0">
+                <WrapPanel><TextBlock Text="Koniec (s), wyłączny" Margin="0,0,8,0"/><TextBox x:Name="EndBox" Width="120" Text="0" TextChanged="Range_TextChanged" AutomationProperties.Name="Wyłączna granica końca w sekundach"/></WrapPanel>
+                <TextBlock x:Name="EndFrameLabel" Margin="0,4,0,0" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+        <Border Background="{StaticResource Panel}" CornerRadius="6" Padding="9">
+          <StackPanel>
+            <WrapPanel>
+              <RadioButton x:Name="TrimMode" Content="1. Przycinanie czasu" GroupName="Mode" IsChecked="True" Checked="Mode_Checked"/>
+              <RadioButton x:Name="CropMode" Content="2. Crop obrazu" GroupName="Mode" Checked="Mode_Checked"/>
+              <TextBlock x:Name="CropLabel" Margin="6" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}"/>
+            </WrapPanel>
+            <StackPanel x:Name="CropSettings" Visibility="Collapsed">
+              <WrapPanel Margin="3,4">
+                <TextBlock Text="X:" Margin="0,0,5,0"/><TextBox x:Name="CropX" Width="62" Margin="0,0,10,0" TextChanged="CropField_Changed" AutomationProperties.Name="Lewy brzeg kadru w pikselach po obrocie"/>
+                <TextBlock Text="Y:" Margin="0,0,5,0"/><TextBox x:Name="CropY" Width="62" Margin="0,0,10,0" TextChanged="CropField_Changed" AutomationProperties.Name="Górny brzeg kadru w pikselach po obrocie"/>
+                <TextBlock Text="W:" Margin="0,0,5,0"/><TextBox x:Name="CropW" Width="68" Margin="0,0,10,0" TextChanged="CropField_Changed" AutomationProperties.Name="Szerokość kadru"/>
+                <TextBlock Text="H:" Margin="0,0,5,0"/><TextBox x:Name="CropH" Width="68" Margin="0,0,10,0" TextChanged="CropField_Changed" AutomationProperties.Name="Wysokość kadru"/>
+                <Button x:Name="ApplyCropButton" Content="Zastosuj" Click="ApplyCrop_Click"/>
+                <Button x:Name="DiscardCropButton" Content="Odrzuć zmiany" Click="DiscardCrop_Click"/>
+                <Button x:Name="ResetCropButton" Content="Cały obraz" Click="ResetCrop_Click"/>
+                <Button x:Name="CentralCropButton" Content="Obszar środkowy" Click="CentralCrop_Click"/>
+              </WrapPanel>
+              <TextBlock x:Name="CropStateLabel" Margin="5,0,5,6" TextWrapping="Wrap"/>
+            </StackPanel>
+            <WrapPanel>
+              <TextBlock Text="Eksport:" Margin="4,0,8,0"/>
+              <ComboBox x:Name="ProfileBox" Width="365" DisplayMemberPath="Name" SelectionChanged="Profile_Changed" AutomationProperties.Name="Profil eksportu"/>
+              <Button x:Name="ExportButton" Content="Eksportuj…" Click="Export_Click" MinWidth="105"/>
+              <Button x:Name="CancelButton" Content="Anuluj eksport" Click="Cancel_Click" IsEnabled="False"/>
+            </WrapPanel>
+          </StackPanel>
+        </Border>
       </StackPanel>
-    </Border>
-    <Border Grid.Row="3" Background="{StaticResource Panel}" CornerRadius="6" Padding="12" Margin="0,0,0,8">
-      <StackPanel>
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-          <RadioButton x:Name="TrimMode" Content="1. Przycinanie czasu" IsChecked="True" Checked="Mode_Checked"/>
-          <RadioButton x:Name="CropMode" Content="2. Crop obrazu" Checked="Mode_Checked"/>
-          <Button Content="Reset crop" Click="ResetCrop_Click"/>
-          <TextBlock x:Name="CropLabel" Text="Cały obraz" Margin="10,0" Foreground="{StaticResource TextSecondary}"/>
-        </StackPanel>
-        <StackPanel x:Name="CropSettings" Orientation="Horizontal" Margin="0,0,0,8" Visibility="Collapsed">
-          <TextBlock Text="X:" Margin="6,0,5,0"/>
-          <TextBox x:Name="CropX" Width="75" Text="0" Margin="0,0,10,0"/>
-          <TextBlock Text="Y:" Margin="0,0,5,0"/>
-          <TextBox x:Name="CropY" Width="75" Text="0" Margin="0,0,10,0"/>
-          <TextBlock Text="W:" Margin="0,0,5,0"/>
-          <TextBox x:Name="CropW" Width="75" Text="0" Margin="0,0,10,0"/>
-          <TextBlock Text="H:" Margin="0,0,5,0"/>
-          <TextBox x:Name="CropH" Width="75" Text="0" Margin="0,0,10,0"/>
-          <Button Content="Zastosuj" Click="ApplyCrop_Click"/>
-        </StackPanel>
-        <DockPanel>
-          <TextBlock Text="Eksport:" Margin="0,0,8,0"/>
-          <ComboBox x:Name="ProfileBox" SelectionChanged="Profile_Changed" Width="310" SelectedIndex="0">
-            <ComboBoxItem Content="Bez rekompresji (oryginalny format)"/>
-            <ComboBoxItem Content="FFV1 MKV (bezstratne kodowanie)"/>
-            <ComboBoxItem Content="WebM VP9 (oryginalne wymiary)"/>
-            <ComboBoxItem Content="WebM VP9 (1/2 szerokości i wysokości)"/>
-            <ComboBoxItem Content="WebM VP9 (1/4 szerokości i wysokości)"/>
-          </ComboBox>
-          <Button x:Name="ExportButton" Content="Eksportuj…" Click="Export_Click" Margin="15,0,0,0"/>
-          <Button x:Name="CancelButton" Content="Anuluj" IsEnabled="False" Click="Cancel_Click"/>
-        </DockPanel>
-      </StackPanel>
-    </Border>
-    <DockPanel Grid.Row="4">
-      <TextBlock x:Name="StatusLabel" Text="Gotowe" DockPanel.Dock="Top" Margin="2,4"/>
-      <ProgressBar x:Name="BusyProgress" Height="4" IsIndeterminate="True" Visibility="Collapsed"/>
-    </DockPanel>
+    </ScrollViewer>
+    <TextBlock x:Name="StatusLabel" Grid.Row="3" Text="Gotowe" Margin="3,9,3,5" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextSecondary}"/>
+    <ProgressBar x:Name="BusyProgress" Grid.Row="4" Height="4" IsIndeterminate="False" Visibility="Collapsed"/>
   </Grid>
 </Window>

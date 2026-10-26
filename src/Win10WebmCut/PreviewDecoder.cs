@@ -1,98 +1,101 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using System.Text.RegularExpressions;
+using System.Threading.Channels;
 
 namespace Win10WebmCut;
 
-/// <summary>
-/// Lekki dekoder podglądu oparty na istniejącym ffmpeg.exe.
-/// Dekoduje klatki do BGRA, bez pośrednich plików na dysku.
-/// Podgląd celowo nie odtwarza dźwięku; ścieżka audio jest zachowywana podczas eksportu.
-/// </summary>
+/// <summary>BGRA frames paired with showinfo PTS. No independent UI playback clock.</summary>
 public static class PreviewDecoder
 {
-    public static async Task DecodeAsync(
-        string input, VideoInfo info, double startSeconds, bool playback,
-        Action<BitmapSource> onFrame, CancellationToken cancellationToken)
+    public const int PlaybackFramesPerSecond = 12;
+    public static readonly TimeSpan MinimumSeekInterval = TimeSpan.FromMilliseconds(80);
+    private const int TimestampQueueCapacity = 64;
+    private static readonly Regex StampPattern = new(
+        @"\bn:\s*(?<index>\d+)\s+pts:\s*\S+\s+pts_time:(?<time>[-+0-9.eE]+)",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+    private sealed record Stamp(long Index, double Time);
+
+    public static async Task DecodeAsync(PreviewRequest request,
+        Action<PreviewFrameData> onFrame, CancellationToken token)
     {
-        const int maxWidth = 960;
-        const int fps = 12;
-        int width = Math.Max(2, (int)Math.Round(Math.Min(info.Width, maxWidth) / 2.0) * 2);
-        int height = Math.Max(2, (int)Math.Round(width * (double)info.Height / info.Width / 2.0) * 2);
-        int stride = checked(width * 4);
-        int frameBytes = checked(stride * height);
-
-        string local = Path.Combine(AppContext.BaseDirectory, "tools", "ffmpeg.exe");
-        var psi = new ProcessStartInfo(File.Exists(local) ? local : "ffmpeg")
+        token.ThrowIfCancellationRequested();
+        VideoInfo info = request.Source;
+        VideoGeometry geometry = VideoGeometry.From(info);
+        PreviewSizing.Validate(request.Size);
+        double start = TimePolicy.DecodePosition(request.Position, info);
+        var stamps = Channel.CreateBounded<Stamp>(new BoundedChannelOptions(TimestampQueueCapacity)
+        { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
+        var filters = geometry.Filters().ToList();
+        if (request.Playback)
+            filters.Add($"select='isnan(prev_selected_t)+gte(t-prev_selected_t,1/{PlaybackFramesPerSecond})'");
+        filters.Add($"scale={request.Size.Width}:{request.Size.Height}:flags=fast_bilinear");
+        filters.Add("setsar=1");
+        filters.Add("format=bgra");
+        filters.Add("showinfo=checksum=0");
+        var args = new List<string>
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = false,
+            "-hide_banner", "-nostdin", "-loglevel", "info", "-copyts", "-start_at_zero",
+            "-ss", TimePolicy.Number(start), "-noautorotate", "-i", info.FullPath,
+            "-map", $"0:{info.Video.Index}", "-an", "-sn", "-dn",
+            "-vf", string.Join(',', filters), "-threads:v", "1", "-c:v", "rawvideo",
+            "-pix_fmt", "bgra", "-fps_mode", "passthrough"
         };
-
-        foreach (string arg in new[] { "-hide_banner", "-loglevel", "error",
-                     "-ss", startSeconds.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture),
-                     "-i", input, "-an", "-sn", "-dn",
-                     "-vf", (playback ? $"fps={fps}," : "") +
-                            $"scale={width}:{height}:flags=fast_bilinear",
-                     "-pix_fmt", "bgra", "-f", "rawvideo" })
-            psi.ArgumentList.Add(arg);
-        if (!playback)
+        if (!request.Playback) args.AddRange(["-frames:v", "1"]);
+        args.AddRange(["-f", "rawvideo", "pipe:1"]);
+        long frames = 0;
+        await ToolProcess.RunAsync("ffmpeg", args, async (stream, readToken) =>
         {
-            psi.ArgumentList.Add("-frames:v");
-            psi.ArgumentList.Add("1");
-        }
-        psi.ArgumentList.Add("pipe:1");
-
-        using var process = new Process { StartInfo = psi };
-        process.Start();
-        using var registration = cancellationToken.Register(() =>
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { }
-        });
-
-        var stream = process.StandardOutput.BaseStream;
-        var stopwatch = Stopwatch.StartNew();
-        long frameIndex = 0;
-        var buffer = new byte[frameBytes];
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
+            var clock = new Stopwatch();
+            double firstTime = 0, previousTime = double.NegativeInfinity;
+            while (true)
             {
-                int read = 0;
-                while (read < frameBytes)
+                byte[] buffer = new byte[request.Size.ByteCount];
+                int filled = 0;
+                while (filled < buffer.Length)
                 {
-                    int count = await stream.ReadAsync(buffer.AsMemory(read, frameBytes - read), cancellationToken);
+                    int count = await stream.ReadAsync(buffer.AsMemory(filled), readToken).ConfigureAwait(false);
                     if (count == 0) break;
-                    read += count;
+                    filled += count;
                 }
-                if (read != frameBytes) break;
-
-                var bitmap = BitmapSource.Create(width, height, 96, 96,
-                    PixelFormats.Bgra32, null, buffer, stride);
-                bitmap.Freeze();
-                onFrame(bitmap);
-
-                if (!playback) break;
-                frameIndex++;
-                var due = TimeSpan.FromSeconds(frameIndex / (double)fps);
-                var delay = due - stopwatch.Elapsed;
-                if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken);
+                if (filled == 0) break;
+                if (filled != buffer.Length) throw new InvalidDataException("Niepełna klatka podglądu.");
+                Stamp stamp;
+                try { stamp = await stamps.Reader.ReadAsync(readToken).ConfigureAwait(false); }
+                catch (ChannelClosedException ex)
+                { throw new InvalidDataException("Brak czasu PTS dla obrazu podglądu.", ex); }
+                if (stamp.Index != frames || stamp.Time < previousTime - TimePolicy.EndTolerance)
+                    throw new InvalidDataException("Niespójna kolejność klatek/czasów podglądu.");
+                if (stamp.Time < -TimePolicy.EndTolerance || stamp.Time > info.Duration + TimePolicy.EndTolerance)
+                    throw new InvalidDataException("Czas klatki wykracza poza rozpoznany zakres nagrania.");
+                double seconds = Math.Clamp(stamp.Time, 0, info.Duration);
+                if (frames == 0) { firstTime = seconds; clock.Start(); }
+                if (request.Playback)
+                {
+                    TimeSpan delay = TimeSpan.FromSeconds(seconds - firstTime) - clock.Elapsed;
+                    if (delay > TimeSpan.Zero) await Task.Delay(delay, readToken).ConfigureAwait(false);
+                }
+                readToken.ThrowIfCancellationRequested();
+                // Ownership transfers here: buffer is never modified again.
+                onFrame(new PreviewFrameData(request.Size, buffer, seconds));
+                previousTime = seconds;
+                frames++;
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (IOException) when (cancellationToken.IsCancellationRequested) { }
-        finally
+        }, token, request.Playback ? null : ToolProcess.ProbeTimeout,
+            errorEnd: () => stamps.Writer.TryComplete(), asyncErrorLine: async (line, readToken) =>
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { }
-            try { await process.WaitForExitAsync(CancellationToken.None); }
-            catch (InvalidOperationException) { }
-        }
+            if (!line.Contains("showinfo", StringComparison.Ordinal)) return;
+            Match match = StampPattern.Match(line);
+            if (!match.Success) return; // Configuration and color metadata lines.
+            if (!long.TryParse(match.Groups["index"].Value, out long index) ||
+                !double.TryParse(match.Groups["time"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds) ||
+                !double.IsFinite(seconds)) throw new InvalidDataException("Nieprawidłowy PTS z showinfo.");
+            // Apply back-pressure instead of failing for tiny frames that fill stdout
+            // slowly while stderr produces timestamps ahead of playback.
+            await stamps.Writer.WriteAsync(new Stamp(index, seconds), readToken).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        if (frames == 0) throw new InvalidDataException("FFmpeg nie zwrócił żadnej pełnej klatki.");
     }
 }

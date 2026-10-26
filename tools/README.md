@@ -1,5 +1,8 @@
-Umieść w tym katalogu pliki ffmpeg.exe i ffprobe.exe dla Windows x64 podczas uruchamiania aplikacji z katalogu projektu. Dla opublikowanego EXE umieść je w podkatalogu tools obok EXE. Alternatywnie dodaj oba programy do PATH.
+# Narzędzia zewnętrzne
 
-Wymagane enkodery: libvpx-vp9, libopus, ffv1, flac.
+Kanoniczna instrukcja: [docs/BUILD.md](../docs/BUILD.md).
 
-Binaria FFmpeg nie są przechowywane w repozytorium. Dystrybucja FFmpeg podlega licencjom odpowiedniego buildu.
+Ten katalog repozytorium **nie jest automatycznie kopiowany** do katalogu EXE.
+Aplikacja szuka `tools` obok EXE, następnie w bezwzględnych katalogach PATH.
+Pakowanie opcjonalnych binariów i ich dokumentów: [PACKAGING](../docs/PACKAGING.md).
+Nie dodawaj binariów ani prywatnych logów do Git.

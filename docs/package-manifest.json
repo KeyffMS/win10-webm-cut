@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-packaging-policy-not-a-built-artifact",
+  "variant": "win-x64-self-contained-single-file",
+  "application": "Win10WebmCut.exe",
+  "requiredPublishedFiles": [
+    "Win10WebmCut.exe", "README.md", "LICENSE", "PRIVACY.md", "CHANGELOG.md",
+    "THIRD-PARTY-NOTICES.md", "docs/BUILD.md", "docs/USER-GUIDE.md",
+    "docs/EXPORT-CONTRACT.md", "docs/ARCHITECTURE.md", "docs/DIAGNOSTICS.md",
+    "docs/PACKAGING.md", "docs/package-manifest.json"
+  ],
+  "ignoredPublishedExtensions": [".pdb"],
+  "runtimeDocuments": [
+    "DOTNET-LICENSE.txt", "DOTNET-THIRD-PARTY-NOTICES.txt",
+    "WINDOWSDESKTOP-LICENSE.txt", "WINDOWSDESKTOP-THIRD-PARTY-NOTICES.txt"
+  ],
+  "optionalTools": ["ffmpeg.exe", "ffprobe.exe"],
+  "toolsDocuments": ["LICENSE.txt", "NOTICES.txt", "SOURCE-COMPLIANCE.txt"],
+  "unknownPublishedFiles": "reject-and-review",
+  "generatedManifest": "PACKAGE-CONTENTS.json",
+  "provenance": "required-actual-versions-origins-variant-and-source-revision",
+  "notEvidence": ["build-success", "runtime-compatibility", "legal-clearance"]
+}

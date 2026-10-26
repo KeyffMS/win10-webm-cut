@@ -1,51 +1,53 @@
 # Win10 WebM Cut
 
-Minimalny edytor wideo dla Windows 10/11 (x64), C# / WPF / .NET 10. Projekt w stylu DictaMute i SightAdapt: bez Electrona, kont i telemetrii.
+Lokalny edytor dwóch operacji: przycięcie początku/końca i prostokątny crop.
+C# / .NET 10 / WPF, docelowo Windows 10/11 x64. Bez Electrona, kont, telemetrii
+ani dodatkowych pakietów NuGet. FFmpeg i FFprobe są zewnętrznymi programami.
 
-## Funkcje
-- Przycinanie początku i końca nagrania (szybki eksport `-c copy`; granice cięcia zależą od keyframes).
-- Crop obrazu: wybór obszaru myszą na podglądzie.
-- Eksport: **Copy (bez rekompresji)**, **FFV1/MKV (bezstratny crop)**, **WebM VP9/Opus 1:1, 1/2 i 1/4 wymiarów**.
-- Crop i trim można łączyć przy eksporcie z rekompresją.
-- Bez dodatkowych zależności NuGet; osobne binaria `ffmpeg.exe` i `ffprobe.exe`.
+## Status tej gałęzi
 
-> **Uwaga:** Crop zawsze wymaga ponownego kodowania. FFV1 zachowuje bezstratnie obraz po przycięciu, ale nie kopiuje oryginalnego skompresowanego strumienia. `-c copy` jest dostępne tylko bez cropu.
+`fix/audit-remediation-2026-10-26`, wersja źródeł `0.2.0-audit.1`.
+Implementacja napraw z [epika #1](https://github.com/KeyffMS/win10-webm-cut/issues/1).
+W tym zakresie wykonano wyłącznie przegląd statyczny i modele w sandboxie.
+**Nie kompilowano ani nie uruchamiano aplikacji, FFmpeg, testów lub benchmarków.**
+Nie jest to potwierdzenie zgodności binarnej, poprawności obrazu, wydajności ani
+oficjalnego wsparcia Microsoft dla każdej edycji Windows. Nie opublikowano EXE.
+`main` nie jest zmieniany ani scalany przez te naprawy.
 
-## Uruchomienie
+## Funkcje i ograniczenia
 
-1. Zainstaluj .NET 10 SDK na Windows i pobierz binaria FFmpeg dla Windows.
-2. Umieść `ffmpeg.exe` i `ffprobe.exe` w folderze `tools` obok pliku EXE **albo** dodaj je do `PATH`.
-3. Z katalogu repozytorium:
+- Trim używa półotwartego zakresu `[początek, koniec)`. Copy nie koduje ponownie;
+  granice zależą od klatek kluczowych i znaczników czasu źródła.
+- Crop: ramka/narożniki lub X/Y/W/H, jawne **Zastosuj/Odrzuć**, osobne **Cały obraz**
+  i **Obszar środkowy**. Niezastosowane pola blokują eksport.
+- Podgląd FFmpeg bez dźwięku: obraz i jego PTS są przyjmowane razem. Numery klatek
+  z FPS są zawsze oznaczone `≈`; nie jest to indeks klatek VFR.
+- Profile: Copy; FFV1/MKV z **audio copy**; stratny WebM VP9/Opus w wymiarach 1:1,
+  1/2 lub 1/4 po cropie. Nie ma gwarancji proporcjonalnie mniejszego pliku.
+- Wynik powstaje w pliku roboczym; dopiero udany eksport i kontrola metadanych
+  pozwalają zastąpić cel. To nie jest gwarancja odporności każdego systemu plików
+  na awarię zasilania, sprzętu lub zewnętrzne zmiany plików.
+- HDR/Dolby Vision, nieznana geometria i formaty spoza jawnego kontraktu nie są
+  niejawnie konwertowane. Część przypadków pozostaje dostępna tylko w Copy.
 
-```powershell
-dotnet run --project src/Win10WebmCut/Win10WebmCut.csproj
-```
+## Dokumentacja — jedno miejsce dla każdej reguły
 
-Publikacja samodzielnego EXE:
+| Temat | Dokument |
+|---|---|
+| SDK, uruchomienie, FFmpeg/FFprobe, PATH i tools | [BUILD](docs/BUILD.md) |
+| Trim, klatki, klawiatura, crop i anulowanie | [USER-GUIDE](docs/USER-GUIDE.md) |
+| Kontenery, jakość, ścieżki audio i ograniczenia | [EXPORT-CONTRACT](docs/EXPORT-CONTRACT.md) |
+| Właściciele stanu, zasobów i procesów | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| Lokalny log, wersje i zgłaszanie błędów | [DIAGNOSTICS](docs/DIAGNOSTICS.md) |
+| Dane lokalne i udostępnianie diagnostyki | [PRIVACY](PRIVACY.md) |
+| Przygotowanie paczki i pochodzenie składników | [PACKAGING](docs/PACKAGING.md) |
+| Zmiany tej gałęzi | [CHANGELOG](CHANGELOG.md) |
+| Licencje składników | [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md), [MIT](LICENSE) |
 
-```powershell
-dotnet publish src/Win10WebmCut/Win10WebmCut.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/win-x64
-```
+## Audyt i naprawy — materiały repozytorium
 
-FFmpeg nie jest dołączany automatycznie; jeśli dystrybuujesz binaria FFmpeg, dołącz ich licencje i wymagane informacje o pochodzeniu.
-
-## Ograniczenia MVP
-- Podgląd korzysta z lokalnego FFmpeg: dekoduje obraz do 960 px i maksymalnie 12 klatek/s bez instalowania kodeków Windows. Podgląd jest bez dźwięku; eksport zachowuje audio zgodnie z wybranym profilem.
-- Crop jest wybierany na prostokątnym podglądzie; przy materiałach z nietypową orientacją/metadanymi wyświetlania rezultat może wymagać korekty.
-- Nie ma obsługi wielu segmentów ani zaawansowanego timeline.
-- Eksport VP9 używa `libvpx-vp9` i `libopus`; wymagany build FFmpeg z tymi enkoderami.
-- Rozmiar wyjściowego WebM nie jest gwarantowany; opcje 1/2 i 1/4 oznaczają redukcję wymiarów, a nie rozmiaru pliku.
-
-## Architektura
-WPF jest tylko GUI. `FfmpegService` uruchamia lokalne narzędzia FFmpeg/FFprobe przez `ProcessStartInfo.ArgumentList`, bez powłoki. Log wyjściowy FFmpeg przekazywany jest do okna. Zatrzymanie eksportu anuluje proces.
-
-## Licencja
-MIT — zobacz `LICENSE`.
-
-## Audyt statyczny
-
-[Audyt kodu, wydajności i pełnej dokumentacji — 2026-10-26](docs/audits/2026-10-26/README.md) obejmuje SPOT, SPOOA (z jawną definicją roboczą), DRY, KISS i clean code. Zawiera priorytety ustaleń, manifest audytowanej wersji oraz modele wykonane lokalnie w sandboxie. Symulacje nie są testami aplikacji ani benchmarkiem; przy przygotowaniu audytu nie uruchamiano GitHub Actions.
-
-## Plan napraw
-
-[Roadmapa i pełny indeks issues F01–F22](docs/ROADMAP.md) oraz [epik #1](https://github.com/KeyffMS/win10-webm-cut/issues/1) porządkują naprawy w sześciu etapach. Każde ustalenie ma jedno autorytatywne issue z zakresem, zależnościami i kryteriami odbioru. Aktualny stan prac znajduje się w issues; utworzenie planu nie oznacza wdrożenia napraw.
+[Historyczny audyt](https://github.com/KeyffMS/win10-webm-cut/blob/feaad3b50ef494786801160ac456c2f8d0bafe40/docs/audits/2026-10-26/README.md) jest niezmiennym opisem starszego
+kodu. [Roadmapa](https://github.com/KeyffMS/win10-webm-cut/blob/main/docs/ROADMAP.md) odsyła do autorytatywnych issues F01–F22.
+[Raport implementacji i modeli](https://github.com/KeyffMS/win10-webm-cut/blob/fix/audit-remediation-2026-10-26/docs/remediation/2026-10-26/README.md) rozlicza
+kryteria zadań i podaje nieweryfikowane aspekty runtime. Te materiały nie wchodzą
+do minimalnej paczki użytkownika. Gałąź naprawcza nie zawiera workflow Actions.

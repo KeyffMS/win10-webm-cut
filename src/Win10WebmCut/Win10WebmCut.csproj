@@ -6,6 +6,25 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Win10WebmCut</AssemblyName>
-    <ApplicationIcon></ApplicationIcon>
+    <Version>0.2.0-audit.1</Version>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <FileVersion>0.2.0.0</FileVersion>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>portable</DebugType>
   </PropertyGroup>
+  <ItemGroup>
+    <Content Include="../../README.md;../../LICENSE;../../PRIVACY.md;../../CHANGELOG.md;../../THIRD-PARTY-NOTICES.md">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="../../docs/BUILD.md;../../docs/USER-GUIDE.md;../../docs/EXPORT-CONTRACT.md;../../docs/ARCHITECTURE.md;../../docs/DIAGNOSTICS.md;../../docs/PACKAGING.md;../../docs/package-manifest.json">
+      <Link>docs/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
 </Project>
