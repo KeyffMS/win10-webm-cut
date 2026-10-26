@@ -45,3 +45,7 @@ MIT — zobacz `LICENSE`.
 ## Audyt statyczny
 
 [Audyt kodu, wydajności i pełnej dokumentacji — 2026-10-26](docs/audits/2026-10-26/README.md) obejmuje SPOT, SPOOA (z jawną definicją roboczą), DRY, KISS i clean code. Zawiera priorytety ustaleń, manifest audytowanej wersji oraz modele wykonane lokalnie w sandboxie. Symulacje nie są testami aplikacji ani benchmarkiem; przy przygotowaniu audytu nie uruchamiano GitHub Actions.
+
+## Plan napraw
+
+[Roadmapa i pełny indeks issues F01–F22](docs/ROADMAP.md) oraz [epik #1](https://github.com/KeyffMS/win10-webm-cut/issues/1) porządkują naprawy w sześciu etapach. Każde ustalenie ma jedno autorytatywne issue z zakresem, zależnościami i kryteriami odbioru. Aktualny stan prac znajduje się w issues; utworzenie planu nie oznacza wdrożenia napraw.
