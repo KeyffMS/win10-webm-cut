@@ -40,13 +40,13 @@ public sealed class EditorController : IAsyncDisposable
     public EditorController(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
-        _presenter = new LatestFramePresenter(dispatcher, generation => _preview.IsCurrent(generation), (generation, frame) =>
+        _presenter = new LatestFramePresenter(dispatcher, generation => IsPreviewCurrent(generation), (generation, frame) =>
         {
             if (_closing || Source is null) return;
             // Image and presentation time are accepted in one dispatcher operation.
             FrameReady?.Invoke(frame);
             DisplayedSize = frame.Size;
-            Position.Present(frame.SourceSeconds, _preview.IsLatest(generation));
+            Position.Present(frame.SourceSeconds, IsPreviewLatest(generation));
             PreviewMessage = "";
             Notify();
         });
@@ -55,7 +55,7 @@ public sealed class EditorController : IAsyncDisposable
                 frame => _presenter.Publish(generation, frame), token),
             (generation, ex) => Post(() =>
             {
-                if (!_preview.IsCurrent(generation) || !_preview.IsLatest(generation)) return;
+                if (!IsPreviewCurrent(generation) || !IsPreviewLatest(generation)) return;
                 Phase = Source is null ? EditorPhase.Empty : EditorPhase.Ready;
                 Position.Failed();
                 PreviewMessage = "Błąd podglądu — szczegóły w diagnostyce";
@@ -64,7 +64,7 @@ public sealed class EditorController : IAsyncDisposable
             }),
             generation => Post(() =>
             {
-                if (!_preview.IsCurrent(generation)) return;
+                if (!IsPreviewCurrent(generation)) return;
                 if (Phase == EditorPhase.Playing) Phase = EditorPhase.Ready;
                 Notify();
             }), PreviewDecoder.MinimumSeekInterval);
@@ -75,7 +75,7 @@ public sealed class EditorController : IAsyncDisposable
             VideoInfo info = await FfmpegService.ProbeAsync(path, token).ConfigureAwait(false);
             Post(() =>
             {
-                if (!_loader.IsCurrent(generation)) return;
+                if (!IsLoaderCurrent(generation)) return;
                 Source = info;
                 StartText = "0"; EndText = TimePolicy.Number(info.Duration);
                 Position.Reset();
@@ -89,7 +89,7 @@ public sealed class EditorController : IAsyncDisposable
             });
         }, (generation, ex) => Post(() =>
         {
-            if (!_loader.IsCurrent(generation)) return;
+            if (!IsLoaderCurrent(generation)) return;
             Phase = EditorPhase.Empty;
             PreviewMessage = "Nie udało się otworzyć pliku";
             Status = ex.Message;
@@ -97,6 +97,13 @@ public sealed class EditorController : IAsyncDisposable
             Error?.Invoke("Błąd otwierania", ex.ToString());
         }));
     }
+
+    // Constructor callbacks run only after an operation is requested.
+    // Accessing the owners through instance methods prevents nullable-flow analysis
+    // from treating the deferred callbacks as immediate constructor dereferences.
+    private bool IsPreviewCurrent(long generation) => _preview.IsCurrent(generation);
+    private bool IsPreviewLatest(long generation) => _preview.IsLatest(generation);
+    private bool IsLoaderCurrent(long generation) => _loader.IsCurrent(generation);
 
     private void VerifyAccess() => _dispatcher.VerifyAccess();
     private void Notify() => Changed?.Invoke();
