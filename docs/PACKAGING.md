@@ -1,90 +1,46 @@
-# Przygotowanie paczki — wyłącznie lokalnie
+# Lokalna publikacja i pakowanie
 
-Nie wykonano publikacji ani przygotowania binarnej paczki tej gałęzi. Ten dokument,
-`package-manifest.json`, reguły `.csproj` i skrypt definiują przyszłą procedurę,
-a nie dowodzą zawartości istniejącego EXE. Nie używa się GitHub Actions, artefaktów
-CI, usług płatnych, podpisywania lub automatycznego wydania.
+[Spis dokumentacji](README.md) · [English](en/PACKAGING.md)
 
-## Warianty i lista plików
+Dokument dla osób przygotowujących własne dystrybucje aplikacji. Repozytorium udostępnia skrypt i listę wymaganych składników, ale **nie** automatyczny instalator ani usługę budującą w chmurze.
 
-Kanoniczna lista dołączanych plików: [package-manifest.json](package-manifest.json).
-Projekt jawnie kopiuje do output/publish LICENSE, README, PRIVACY, CHANGELOG,
-THIRD-PARTY-NOTICES i bieżące instrukcje użytkownika/architektury/diagnostyki.
-`ExcludeFromSingleFile=true` zostawia te dokumenty jako pliki obok EXE.
-Historyczne audyty, roadmapa, modele i źródła nie należą do minimalnej paczki;
-linki do nich w README odnoszą się do repozytorium.
+## Warianty
 
-Podstawowy wariant self-contained dostarcza EXE i materiały .NET/Windows Desktop
-Runtime, a FFmpeg i FFprobe pozostają zewnętrzną instalacją użytkownika. Wariant
-rozszerzony dodaje oba narzędzia do tools obok EXE i dokumenty konkretnego buildu.
-Nie wolno jednocześnie twierdzić, że paczka nie zawiera FFmpeg, i dołączać jego
-binarium bez deklaracji.
+**Framework-dependent:** docelowy komputer wymaga .NET 10 Desktop Runtime oraz zewnętrznych FFmpeg/FFprobe.
 
-Procedura publikacji źródeł jest w [BUILD](BUILD.md). Użyj nowego, czystego katalogu
-output i właściwej gałęzi. Włączony single-file nie oznacza pominięcia notices.
-Skrypt przygotowania nie buduje aplikacji ani nie uruchamia binariów. Nieznany
-plik output powoduje odmowę: należy ustalić, czy to wymagana zależność, zamiast
-skasować ją lub pominąć. Pliki PDB nie trafiają do paczki użytkownika.
+**Self-contained win-x64:** runtime .NET znajduje się w publikacji, ale ffmpeg.exe i ffprobe.exe trzeba zainstalować osobno lub jawnie dołączyć do tools przy EXE. Single-file nie oznacza, że dokumenty i legal notices są wbudowane w jeden EXE.
 
-## Rzeczywiste pochodzenie, nie szablon udający dowód
+## Publikacja
 
-Przed przygotowaniem paczki dostarcz lokalny JSON pochodzenia runtime, np.:
+~~~powershell
+dotnet publish .\src\Win10WebmCut\Win10WebmCut.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\artifacts\win-x64
+~~~
 
-```json
-{
-  "version": "REPLACE_ME: rzeczywiste wersje NETCore i WindowsDesktop",
-  "origin": "REPLACE_ME: źródło dokładnie użytego runtime/SDK",
-  "variant": "REPLACE_ME: win-x64 self-contained i wariant runtime",
-  "documents": {
-    "DOTNET-LICENSE.txt": "REPLACE_ME: lokalny plik",
-    "DOTNET-THIRD-PARTY-NOTICES.txt": "REPLACE_ME: lokalny plik",
-    "WINDOWSDESKTOP-LICENSE.txt": "REPLACE_ME: lokalny plik",
-    "WINDOWSDESKTOP-THIRD-PARTY-NOTICES.txt": "REPLACE_ME: lokalny plik"
-  }
-}
-```
+Pliki dokumentacji są kopiowane obok EXE (ExcludeFromSingleFile=true). Minimalny zestaw jest zdefiniowany w [package-manifest.json](package-manifest.json): README, dokumentacja w obu językach, LICENSE, PRIVACY, THIRD-PARTY-NOTICES i pliki polityki paczki.
 
-Dla FFmpeg drugi JSON ma `version`, `origin`, `variant`, `configuration` i obiekt
-`documents` z `LICENSE.txt`, `NOTICES.txt`, `SOURCE-COMPLIANCE.txt`. Dokument ostatni
-opisuje faktyczny sposób zapewnienia wymaganych źródeł/oferty dla konkretnego
-buildu; nie może być pustym zdaniem „spełniono GPL”. Uwzględnij dostarczone biblioteki
-i powiązane obowiązki. Skrypt weryfikuje obecność danych i dokumentów, **nie ich
-prawną kompletność**. W razie potrzeby wariant bez narzędzi ogranicza zakres
-redystrybucji, ale nie znosi obowiązków dla dołączonego runtime.
+## Dokumenty licencyjne
 
-Wartości `REPLACE_ME` nie są akceptowane jako rzeczywiste dane. Nie publikuj JSON
-z lokalnymi ścieżkami lub sekretami: skrypt publikuje wybrane informacje pochodzenia,
-nie surowe ścieżki dokumentów. Źródłem wersji aplikacji jest metadata EXE; źródłowy
-commit podaje opiekun i musi odpowiadać użytemu kodowi. Nie zgaduj numerów składników.
+Skrypt przygotowania paczki wymaga JSON z rzeczywistym pochodzeniem runtime (version, origin, variant) i ścieżkami do czterech dokumentów:
 
-## Polecenia do wykonania dopiero po odrębnej publikacji
+- DOTNET-LICENSE.txt
+- DOTNET-THIRD-PARTY-NOTICES.txt
+- WINDOWSDESKTOP-LICENSE.txt
+- WINDOWSDESKTOP-THIRD-PARTY-NOTICES.txt
 
-Z katalogu repozytorium, przykład wariantu bez narzędzi:
+Dla opcjonalnych plików FFmpeg/FFprobe potrzebny jest osobny JSON zawierający version, origin, variant, configuration oraz pliki LICENSE.txt, NOTICES.txt i SOURCE-COMPLIANCE.txt. Pochodzenie i komplet dokumentów muszą odpowiadać **konkretnym buildom**, nie ogólnym wzorcom licencji. Skrypt nie ocenia zgodności prawnej.
 
-```powershell
-.\scripts\Prepare-Package.ps1 `
-  -PublishDirectory .\artifacts\win-x64 `
-  -Destination .\artifacts\package-win-x64 `
-  -RuntimeProvenance .\runtime-provenance.local.json `
-  -SourceRevision '<pełne 40 znaków SHA źródeł użytych przy publikacji>'
-```
+## Złożenie paczki
 
-Dla wariantu z FFmpeg dodaj `-ToolsDirectory` i `-FfmpegProvenance`. Folder docelowy
-nie może istnieć ani znajdować się wewnątrz output publikacji. Skrypt rezerwuje
-nowy folder roboczy, kopiuje wyłącznie dozwolone składniki, odrzuca reparse points,
-liczy SHA256 i zapisuje `PACKAGE-CONTENTS.json`. Dopiero na końcu przenosi folder
-pod żądaną nazwę. Błąd sprząta tylko własny folder roboczy; nie usuwa output
-publikacji ani wcześniejszej paczki. Nie wykonuje żadnych połączeń sieciowych.
+Po publikacji i przygotowaniu lokalnego runtime-provenance.local.json:
 
-Manifest wynikowy ma listę ścieżek, rozmiarów i hashy, wersję produktu, commit
-źródeł, rzeczywiste dane runtime i opcjonalnych narzędzi. Nie jest dowodem działania
-binarium ani zastępczym SBOM całego transitive runtime. Przed udostępnieniem trzeba
-przejrzeć dane i wymagane notices. Dopiero niezależna późniejsza weryfikacja może
-potwierdzić uruchamianie/medialne wyniki; model drzewa pakowania tego nie robi.
+~~~powershell
+.\scripts\Prepare-Package.ps1 -PublishDirectory .\artifacts\win-x64 -Destination .\artifacts\package-win-x64 -RuntimeProvenance .\runtime-provenance.local.json -SourceRevision '<pelny-40-znakowy-SHA>'
+~~~
 
-## Dane, których nie pakujemy
+Aby dołączyć własny FFmpeg, podaj także **-ToolsDirectory** i **-FfmpegProvenance**. Folder docelowy nie może już istnieć ani znajdować się wewnątrz folderu publikacji.
 
-Logi/dumpy, media, klucze, pliki środowiska, profile użytkownika, pliki robocze
-wyników oraz symbole PDB nie wchodzą do jawnej listy. Nie archiwizuj całego repo,
-katalogu Downloads ani folderu użytkownika jako „paczkę”. `.gitignore` jest
-pomocniczy; nie zastępuje allowlisty. Prywatność i redakcja: [PRIVACY](../PRIVACY.md).
+Skrypt używa allowlisty plików, odrzuca nieznane składniki i reparse points, liczy SHA256 i zapisuje PACKAGE-CONTENTS.json. Nie uruchamia ani nie pobiera binariów; nie modyfikuje wcześniejszej paczki. Po niepowodzeniu sprząta tylko swój nowy folder roboczy.
+
+Nie pakuj .git, logów, dumpów, prywatnych wideo, sekretów, plików PDB ani przypadkowej zawartości katalogu użytkownika. Upewnij się, że wersje, notices i ścieżki dokumentacji w paczce odpowiadają faktycznym binariom. Przed dystrybucją przetestuj uruchomienie i eksport na docelowym komputerze oraz przejrzyj zobowiązania licencyjne. Manifest hashy nie jest certyfikatem zgodności ani testem aplikacji.
+
+Szczegóły licencji: [THIRD-PARTY-NOTICES](../THIRD-PARTY-NOTICES.md).

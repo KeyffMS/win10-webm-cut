@@ -1,96 +1,53 @@
-# Kontrakt eksportu i geometrii
+# Profile eksportu i ograniczenia mediów
 
-Właściciele w kodzie: `ExportProfiles` (stałe profile), `ExportValidation`
-(walidacja/plany), `VideoGeometry` (współrzędne), `FfmpegService` (argumenty),
-`ExportTransaction` (zatwierdzenie). Treść tego dokumentu nie zastępuje tych
-reguł; opisuje ich wersję `0.2.0-audit.1`, bez wyników testów mediów.
+[Spis dokumentacji](README.md) · [English](en/EXPORT-CONTRACT.md)
 
-## Pięć stabilnych identyfikatorów
+Źródłem faktycznych reguł są klasy ExportProfiles, Containers, ExportValidation, VideoGeometry, FfmpegService i ExportTransaction.
 
-| ID | Kontener / obraz | Audio | Rozmiar |
+## Profile
+
+| ID | Kontener, wideo | Audio | Rozdzielczość |
 |---|---|---|---|
-| Copy | Oryginalne rozszerzenie, jawny mukser, `-c copy` | Copy | Bez zmiany wymiarów |
-| Ffv1 | MKV, FFV1 level 3, źródłowy obsługiwany pixel format | **Copy** | Po obrocie/cropie, bez skalowania |
-| WebmFull | WebM, libvpx-vp9 CRF 32, good/cpu-used 4/row-mt | libopus 96 kb/s na ścieżkę, 48 kHz | 1:1 po cropie |
-| WebmHalf | Jak WebmFull | Jak WebmFull | Oba wymiary /2, w dół do parzystych |
-| WebmQuarter | Jak WebmFull | Jak WebmFull | Oba wymiary /4, w dół do parzystych |
+| Copy | Oryginalne rozszerzenie/mukser, kopiowanie strumieni | copy | Bez zmian |
+| Ffv1 | MKV, FFV1 level 3, źródłowy obsługiwany pixel format | copy | Po cropie i obrocie, bez skalowania |
+| WebmFull | WebM, VP9, CRF 32, good/cpu-used 4, row-mt, yuv420p | Opus 96 kb/s na ścieżkę, 48 kHz | 1:1 |
+| WebmHalf | Jak WebmFull | Jak WebmFull | Oba wymiary /2 |
+| WebmQuarter | Jak WebmFull | Jak WebmFull | Oba wymiary /4 |
 
-Identyfikatory nie są pozycjami ComboBox. Parametry WebM mają jednego właściciela.
-Zmiana FFV1 z FLAC na audio copy jest celowa: nie deklarujemy zachowania próbek
-float audio po niejawnej konwersji do formatu całkowitoliczbowego. Gdy kopiowany
-kodek audio nie jest na dopuszczonej liście MKV, eksport odmawia; nie przechodzi
-sam na stratne lub inne bezstratne kodowanie.
+Wymiary WebM liczone są **po** ewentualnym cropie i obrocie oraz zaokrąglane w dół do parzystych. Wynik poniżej 2 × 2 jest odrzucany. Nie ma suwaka CRF; parametry profili są stałe.
 
-## Mapowanie i metadane
+**Copy** nie przekodowuje obrazu/audio, ale nie daje bitowo identycznego kontenera i nie gwarantuje granicy wybranej klatki. **FFV1** zachowuje obsługiwane próbki obrazu po transformacji; nie gwarantuje zachowania wszystkich innych strumieni. **WebM** jest stratny; rozmiar i czas kodowania zależą od treści.
 
-**Copy:** wszystkie strumienie `-map 0`, metadane i rozdziały wejścia. Przed startem
-każdy strumień musi pasować do konserwatywnej tabeli kontenera w `Containers`.
-Dotyczy to również napisów i załączników. Nieznany typ/kodek blokuje Copy zamiast
-być pomijany. Obsługiwane rozszerzenia tabeli: MKV, WebM, MP4/M4V, MOV, AVI,
-TS/MTS/M2TS, WMV i MPG/MPEG. Lista kodeków w źródle jest autorytatywna;
-nie jest to uniwersalna macierz zgodności wszystkich buildów FFmpeg.
-Copy nie jest bitowo identycznym plikiem: zmienia kontener/timestamps przy muxowaniu.
-Zachowanie wszystkich prywatnych metadanych danego kontenera nie jest gwarantowane.
+## Jak traktowane są strumienie
 
-**Kodowanie:** pierwsze wideo niebędące okładką oraz wszystkie ścieżki audio.
-Dodatkowe wideo, okładki, napisy, dane, załączniki, rozdziały i dowolne tagi są
-pomijane świadomie; komunikat przed eksportem to wymienia. Obsługiwane wartości
-primaries/transfer/colorspace/range są przekazywane jawnie. Nieznanym wartościom
-nie nadaje się domyślnego profilu kolorów. Dodatkowe metadane przestrzenne/audio
-nieobjęte tym kontraktem nie mają obietnicy zachowania.
+**Copy:** mapowane są wszystkie strumienie, metadane i rozdziały, jeśli są zgodne z konserwatywnymi regułami kontenera. Nieobsługiwany strumień **blokuje** Copy zamiast być pomijanym. Rozpoznawane rozszerzenia: MKV, WebM, MP4/M4V, MOV, AVI, TS/MTS/M2TS, WMV, MPG/MPEG. Szczegółowa lista dopuszczalnych kombinacji znajduje się w Containers.CanCopyStream.
 
-WebM koduje do YUV420P 8-bit. Przyjmowane do tego profilu źródła SDR mają formaty
-`yuv420p`, `yuv422p`, `yuv444p`, `nv12` albo `nv21`. Nie przyjmuje po cichu RGB,
-alpha ani większej głębi; wybór FFV1 nadal wymaga obsługi dokładnego formatu przez
-enkoder. Opus wymaga rozpoznanej częstotliwości i od 1 do 8 kanałów. Mapowanie
-specjalnych układów kanałów rozstrzyga FFmpeg; błąd przerywa transakcję, nie zmienia
-profilu automatycznie.
+**Kodowanie FFV1/WebM:** wybierane jest pierwsze wideo niebędące okładką i wszystkie ścieżki audio. Pomijane są dodatkowe wideo, okładki, napisy, dane, załączniki, rozdziały i część metadanych. Komunikat przed eksportem o tym ostrzega. Kolorystyka jest zachowywana tylko w zakresie jawnie obsługiwanych informacji.
 
-FFV1 wymusza `+pix_fmt` źródła, blokując automatyczne konwersje formatu. Preflight
-czyta deklarowane formaty enkodera. Bezstratność dotyczy obsługiwanych próbek obrazu
-**po** cropie/obrocie, nie całego pliku, kolorów odtwarzacza ani odrzuconych pikseli.
-Znane HDR/Dolby Vision i gamut BT.2020 są odrzucane przy kodowaniu. FFV1 z obrotem
-90/270° odrzuca asymetryczne siatki chromy 422/440/411, zamiast obiecywać ich
-bezstratną resamplację. Copy może obsługiwać takie źródła według tabeli kontenera.
+## Formaty obrazu i dźwięku
 
-## Współrzędne, SAR i wymiary
+WebM przyjmuje wideo **SDR, 8-bit** o źródłowym pixel format: yuv420p, yuv422p, yuv444p, nv12 lub nv21. Wideo wynikowe jest yuv420p — możliwa jest utrata informacji chrominancji. Profil nie zmienia po cichu większej głębi, RGB i alpha na 8-bit. Nie obsługuje automatycznego tone mappingu HDR.
 
-Podgląd i kodowanie wyłączają autorotację oraz stosują tę samą jawną transformację:
-0°, 90°, 180° albo 270° zgodnie z odczytaną orientacją. Dowolne obroty, odbicia,
-shear, translation/perspective i nieobsługiwana macierz wyłączają crop/podgląd,
-nie są zgadywane. Przy kodowaniu wyjściowa orientacja metadanych jest zerowana,
-ponieważ obrót jest już wykonany na pikselach.
+FFV1 wymaga, by konkretny zainstalowany enkoder deklarował obsługę źródłowego formatu pikseli. Nie następuje niejawna konwersja pixel format. Przy obrotach 90°/270° asymetryczne siatki chromy 422/440/411 są odrzucane, zamiast wymuszać resampling.
 
-X/Y/W/H odnoszą się do wymiarów po obrocie. SAR jest uwzględniany przy proporcjach
-podglądu, a nie jako dodatkowe piksele cropu. Dopuszczony SAR mieści się w zakresie
-0.01–100. Brak SAR, `N/A` i `0:1` oznaczają przyjęcie kwadratowych pikseli; błędnych
-metadanych obrazu nie da się tym naprawić. Rzeczywisty rozmiar bitmapy po
-zaokrągleniu jest używany do letterboxingu i mapowania myszy.
+Audio WebM jest kodowane do **libopus**, 48 kHz, **96 kb/s na ścieżkę**. Akceptowane jest od 1 do 8 kanałów i rozpoznana wejściowa częstotliwość próbkowania; nietypowy układ kanałów może zostać odrzucony przez FFmpeg. Audio FFV1 jest **kopiowane** i wymaga kodeka dopuszczonego do Matroski przez program (m.in. AAC, Opus, Vorbis, MP3, FLAC, AC3, kompatybilne PCM).
 
-Źródło ma limit 32768 pikseli na wymiar i 128 Mi pikseli łącznie. To kontrola
-rozmiarów, nie obietnica zmieszczenia dekodera w określonym RAM. Pełny obraz może
-mieć 1 piksel lub nieparzysty wymiar, lecz rzeczywisty crop wymaga co najmniej 2×2
-oraz parzystych współrzędnych/wymiarów. WebM 1:1 wymaga parzystych wymiarów;
-redukcje wyliczają oba wymiary w dół do parzystych. Wynik mniejszy niż 2×2 jest
-odrzucany przed FFmpeg — zero nie trafia przypadkowo do filtra scale.
+## Obrót, SAR i crop
 
-## Bezpieczeństwo i granice gwarancji
+Program obsługuje obroty 0°, 90°, 180° i 270°, stosowane jawnie przy dekodowaniu/eksporcie. Nieznane macierze, odbicia, kąty pośrednie i inne transformacje nie są zgadywane. Kodowana orientacja wyjściowa jest zerowana, ponieważ obrót jest już wykonany na pikselach.
 
-Transakcja korzysta ze zwykłego lokalnego pliku docelowego, unikalnego pliku
-roboczego w tym samym katalogu, `File.Move(overwrite:false)` lub `File.Replace`.
-Nie ma fallbacku „usuń stary i skopiuj nowy”. Reparse target jest odrzucany.
-Tożsamość plików jest odczytywana z uchwytu Windows (volume/file ID), uzupełniona
-rozmiarem i czasem zapisu; aliasy tego samego wejścia są odrzucane. Źródło nie może
-zmienić rewizji między probe a eksportem ani w trakcie eksportu.
+Współrzędne cropu odnoszą się do pikseli **po obrocie, przed korekcją SAR**. SAR wpływa na proporcje wyświetlania, ale nie na współrzędne kadru. Dopuszczalny SAR to 0,01–100; brak, N/A lub 0:1 oznaczają założenie kwadratowych pikseli.
 
-Nie jest to blokada transakcyjna wszystkich zewnętrznych programów. Istnieje
-okno TOCTOU między kontrolą rewizji a operacją systemową. Identyfikatory plików
-mogą być ponownie użyte przez system plików; udział sieciowy lub nietypowy nośnik
-może nie dostarczyć wiarygodnej tożsamości. Nie deklaruje się odporności na awarie
-zasilania, sprzętu, złośliwe zmiany ani atomowości wszystkich udziałów sieciowych.
-Przy braku wymaganej operacji systemowej eksport odmawia zamiast kasować cel.
+Górny limit geometrii źródła: **32768 pikseli na wymiar i 128 Mi pikseli łącznie**. Faktyczny crop wymaga parzystych X/Y/W/H i obszaru minimum 2 × 2, mieszczącego się w granicach. **Cały obraz** oznacza brak filtra crop, również przy nieparzystej geometrii źródła.
 
-Weryfikacja wyniku przed zatwierdzeniem to niepusty plik i odczyt podstawowych
-metadanych/wymiarów oraz niezmienione źródło. **Nie jest to pełne dekodowanie,
-porównanie próbek, kontrola synchronizacji audio ani audyt jakości.** W tej gałęzi
-również samego tego kodu nie uruchamiano na rzeczywistych plikach.
+Znane HDR/Dolby Vision i szeroka przestrzeń BT.2020 są odrzucane dla kodowania. Nieobsługiwane źródła mogą pozostać dostępne dla Copy według zgodności kontenera.
+
+## Czas i dokładność
+
+Zakres czasu to **[start, end)**. Koniec równy długości filmu jest granicą EOF. Tryb Copy używa stream copy, więc rzeczywisty punkt cięcia może zależeć od keyframes i timestampów. Liczniki klatek w UI z symbolem ≈ są szacunkami FPS i nie są indeksami pliku VFR.
+
+## Bezpieczny eksport
+
+Źródło ma rejestrowaną rewizję/tożsamość Windows. Program tworzy unikalny plik roboczy w docelowym katalogu, sprawdza niepustość i podstawowe metadane/wymiary, porównuje rewizję źródła, a potem używa Move lub Replace. Nie wykonuje kasowania wcześniejszego celu jako części anulowania. Anulowanie można skutecznie przyjąć do ostatniego punktu przed zatwierdzeniem, lecz nie cofa zamiany już dokonanej.
+
+Takie kontrole nie gwarantują pełnego dekodowania wszystkich klatek, synchronizacji audio, jakości obrazu, odporności na utratę zasilania ani blokady zewnętrznych procesów modyfikujących pliki. Nietypowe systemy plików/udziały mogą nie obsłużyć wymaganych operacji. Dla ważnych materiałów zachowaj oryginał i sprawdź wynik odtwarzaczem.

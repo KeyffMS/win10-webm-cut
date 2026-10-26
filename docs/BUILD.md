@@ -1,105 +1,66 @@
-# Środowisko, uruchamianie i narzędzia
+# Instalacja, budowanie i uruchomienie
 
-To jedyna kanoniczna instrukcja lokalizacji narzędzi. Kod: `ToolResolver.Resolve`.
-Polecenia poniżej są instrukcją dla lokalnego komputera Windows; **nie były
-uruchamiane w ramach implementacji/modelowania tej gałęzi**.
+[Spis dokumentacji](README.md) · [English](en/BUILD.md)
 
-## SDK a uruchomienie
+**System i zależności:** [Wymagania](REQUIREMENTS.md). Polecenia dotyczą PowerShell na Windows.
 
-Do pracy ze źródłami potrzebny jest SDK .NET 10 z WPF. `global.json` wskazuje
-`10.0.100`, `rollForward=latestFeature`, `allowPrerelease=false`: wybiera dostępny
-stabilny feature band linii 10.0, nie przechodzi automatycznie do innej głównej
-wersji. To polityka wyboru SDK, nie dowód zgodności wszystkich aktualizacji.
-Nie trzeba usuwać innych SDK. Visual Studio, Node.js i npm nie są wymaganiami
-projektu. Samo istnienie szablonu WPF w starszym SDK nie dowodzi dostępności SDK 10.
+## Źródła i SDK
 
-Z katalogu repozytorium:
-
-```powershell
+~~~powershell
+git clone https://github.com/KeyffMS/win10-webm-cut.git
+cd win10-webm-cut
 dotnet --list-sdks
 dotnet --version
-dotnet run --project .\src\Win10WebmCut\Win10WebmCut.csproj -c Release
-```
+~~~
 
-Publikacja framework-dependent wymaga odpowiedniego .NET Desktop Runtime na
-komputerze docelowym. Publikacja self-contained zawiera runtime; użytkownik
-końcowy nie potrzebuje SDK. FFmpeg/FFprobe nie są częścią żadnego z tych wariantów.
-Docelowy interfejs to Windows/WPF; nie deklaruje się przenośności na Linux ani
-oficjalnego wsparcia każdego wydania Windows 10 przez Microsoft.
+Plik global.json wybiera stabilne SDK z linii **10.0** od 10.0.100 z polityką latestFeature. Nie trzeba odinstalowywać innych wersji .NET. Visual Studio nie jest wymagane przy użyciu CLI.
 
-## FFmpeg i FFprobe: deterministyczne wyszukiwanie
+## Instalowanie FFmpeg i FFprobe
 
-Dla każdego z narzędzi kolejność jest taka sama:
+Zainstaluj zaufany build zawierający ffmpeg.exe, ffprobe.exe i wymagane filtry/kodeki. Dwie obsługiwane lokalizacje to:
 
-1. `tools\ffmpeg.exe` / `tools\ffprobe.exe` względem **AppContext.BaseDirectory**,
-   czyli katalogu uruchomionego EXE.
-2. Plik o tej nazwie w pierwszym pasującym **bezwzględnym** katalogu `PATH`.
+1. Absolutny katalog w PATH.
+2. Folder **tools bezpośrednio obok uruchomionego EXE**.
 
-Puste i względne elementy PATH, aliasy powłoki i bieżący katalog nie są brane pod
-uwagę. Nie ma automatycznego pobierania binariów ani wyszukiwania w całym dysku.
-Narzędzia muszą pochodzić z zaufanego źródła; resolver nie weryfikuje ich podpisów.
-`Diagnostyka` pokazuje rzeczywiście wybrane ścieżki, nie zgaduje lokalizacji.
+Przykład po kompilacji Release:
 
-Przykład dla `dotnet run -c Release` bez RID:
-
-```text
-repo/
-  src/Win10WebmCut/bin/Release/net10.0-windows/
-    Win10WebmCut.exe
-    tools/ffmpeg.exe
-    tools/ffprobe.exe
-```
-
-Przykład po publikacji:
-
-```text
-artifacts/win-x64/
+~~~text
+src/Win10WebmCut/bin/Release/net10.0-windows/
   Win10WebmCut.exe
-  tools/ffmpeg.exe       # opcjonalnie; alternatywą jest PATH
-  tools/ffprobe.exe
-```
+  tools/
+    ffmpeg.exe
+    ffprobe.exe
+~~~
 
-**`repo/tools` nie jest automatycznie kopiowany do output/publish.** Uruchomienie
-polecenia z katalogu repo nie zmienia `AppContext.BaseDirectory`. Zmiana CWD nie
-może wybierać innego narzędzia przypadkiem. Wariant z binariami obok EXE jest
-pakowany dopiero według [PACKAGING](PACKAGING.md).
+**Repozytorium/tools nie jest kopiowane automatycznie.** Zmiana folderu roboczego nie zmienia sposobu wyszukiwania narzędzi. Po podmianie binariów zaleca się restart aplikacji.
 
-## Możliwości i wersje
+## Kompilacja
 
-Podgląd wymaga filtrów normalizacji geometrii, `select`, `scale`, `format`,
-`showinfo`, rawvideo/BGRA i opcji PTS użytych w `PreviewDecoder`. Eksport sprawdza
-wersje FFmpeg/FFprobe, listę mukserów i enkoderów. FFV1 wymaga zadeklarowanego
-przez enkoder źródłowego formatu pikseli. Copy nie wymaga enkodera wideo/audio;
-WebM wymaga libvpx-vp9 i — tylko gdy istnieje audio — libopus. FFV1 kopiuje audio,
-więc FLAC nie jest już wymaganiem aplikacji.
+~~~powershell
+dotnet restore .\src\Win10WebmCut\Win10WebmCut.csproj
+dotnet build .\src\Win10WebmCut\Win10WebmCut.csproj -c Release
+~~~
 
-Preflight to kontrola zadeklarowanych możliwości, nie test jakości lub każdej
-kombinacji kodek/kontener. Nie ustanowiono listy buildów FFmpeg zakwalifikowanych
-przez testy tej gałęzi. Nieobsługiwany filtr/opcja powoduje jawny błąd narzędzia,
-a nie cichą zmianę profilu. Cache możliwości jest związany ze ścieżką, rozmiarem
-i czasem modyfikacji obu narzędzi. Po zmianie instalacji zaleca się restart.
+Pliki kompilacji znajdują się w src/Win10WebmCut/bin/Release/net10.0-windows/. Aby uruchomić już zbudowany program:
 
-Nie wymieniać źródła ani narzędzi w trakcie pracy. Zmiana rewizji źródła jest
-odrzucana; nie jest to ochrona przed złośliwym procesem zmieniającym pliki między
-kontrolą a użyciem.
+~~~powershell
+dotnet run --project .\src\Win10WebmCut\Win10WebmCut.csproj -c Release --no-build
+~~~
 
-## Publikacja lokalna — procedura, nie wykonana czynność
+## Publikacja self-contained win-x64
 
-```powershell
-dotnet publish .\src\Win10WebmCut\Win10WebmCut.csproj `
-  -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true -o .\artifacts\win-x64
-```
+~~~powershell
+dotnet publish .\src\Win10WebmCut\Win10WebmCut.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\artifacts\win-x64
+~~~
 
-Projekt nie włącza trimming. Natywne biblioteki mogą być wydobywane przez runtime
-z single-file podczas uruchomienia. Dokumenty mają `ExcludeFromSingleFile=true`
-i pozostają obok aplikacji. Nie udostępniać samego EXE bez pozostałych dokumentów.
-Osobne kroki przygotowania/proweniencji paczki: [PACKAGING](PACKAGING.md).
+W self-contained runtime .NET jest w paczce, ale **FFmpeg i FFprobe nadal nie są dołączane automatycznie**. Dokumentacja jest kopiowana jako odrębne pliki (ExcludeFromSingleFile=true). Single-file może rozpakowywać wewnętrzne biblioteki natywne. Nie włączono PublishTrimmed.
 
-## Polityka utrzymania
+## Problemy
 
-Nie aktualizować automatycznie SDK, FFmpeg ani biblioteki runtime użytkownika.
-Zmiany wersji należy opisywać w CHANGELOG i informacjach o paczce. Wersję aplikacji
-określa `.csproj`; diagnostyka odczytuje metadane assembly i uruchomiony runtime.
-Stan „źródła przejrzane/modelowane” nie może zmienić się w „wersja wspierana na
-Windows” bez odrębnych dowodów. W tej gałęzi nie ma Actions ani zdalnego builda.
+- Brak SDK: sprawdź dotnet --list-sdks i global.json.
+- Brak Windows Desktop Runtime: zainstaluj wariant Desktop x64 lub opublikuj self-contained.
+- Brak FFmpeg/FFprobe: sprawdź tools obok EXE oraz bezwzględny PATH.
+- Brak enkodera: zweryfikuj ffmpeg -encoders; profile nie przełączają jakości automatycznie.
+- Problem z konkretnym plikiem: zobacz [Diagnostykę](DIAGNOSTICS.md) i [Kontrakt eksportu](EXPORT-CONTRACT.md).
+
+Proces budowania nie wymaga GitHub Actions.

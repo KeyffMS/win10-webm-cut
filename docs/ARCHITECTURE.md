@@ -1,115 +1,76 @@
-# Architektura i właściciele reguł
+# Architektura aplikacji
 
-Mała aplikacja WPF bez dodatkowego frameworka MVVM/DI. Code-behind jest adapterem
-widoku, a nie właścicielem procesów, czasu lub kasowania plików. Podział wynika z
-konkretnych napraw, nie z próby budowy uniwersalnego silnika multimedialnego.
+[Spis dokumentacji](README.md) · [English](en/ARCHITECTURE.md)
 
-## SPOT / DRY / KISS
+## Stos i przepływ
 
-| Reguła lub zasób | Jedyny właściciel | Konsumenci |
-|---|---|---|
-| Stany i dopuszczalne działania edytora | EditorController | MainWindow |
-| Ostatni wybór pliku / generacja otwarcia | LatestOperation<string> w kontrolerze | MediaProbe, UI |
-| Sesja podglądu, aktywny Task/CTS, jedno oczekujące żądanie | LatestOperation<PreviewRequest> | PreviewDecoder, kontroler |
-| Proces, exit, czytniki, anulowanie i timeout | ToolProcess | MediaProbe, PreviewDecoder, ToolCapabilities, FfmpegService |
-| Wyszukiwanie binariów | ToolResolver | ToolProcess, ToolCapabilities, diagnostyka |
-| Wersje/możliwości enkodera i muksera | ToolCapabilities | preflight eksportu |
-| Rewizja/tożsamość pliku Windows | FileRevision | probe, transakcja, usługa eksportu |
-| Niezmienny opis źródła | VideoInfo + StreamInfo | kontroler, decoder, walidator |
-| Żądana i faktycznie pokazana pozycja | Timeline | kontroler i etykiety |
-| Sekundy, numeracja szacunkowa, kroki | TimePolicy | kontroler, walidator, GUI |
-| Parowanie BGRA z rzeczywistym PTS | PreviewDecoder | LatestFramePresenter |
-| Jedna oczekująca klatka/callback | LatestFramePresenter | kontroler i adapter bitmapy |
-| Budżet rozmiaru preview | PreviewSizing | kontroler |
-| Obrót/SAR i transformacja myszy | VideoGeometry | preview, UI, eksport |
-| Draft oraz zatwierdzony crop | CropEditor | kontroler, snapshot |
-| Definicje pięciu profili | ExportProfiles / Containers | lista UI, plan, preflight, argumenty |
-| Walidacja żądania i rozmiar wynikowy | ExportValidation | snapshot i granica usługi |
-| Budowanie argumentów eksportu | FfmpegService | ToolProcess |
-| Plik roboczy i rozstrzygnięcie commit/cancel | ExportTransaction | FfmpegService; nigdy UI |
-| Kolory/stany kontrolek | zasoby App.xaml | okna/dialogi |
-| Dziennik/retencja/redakcja | AppLog | właściciele operacji, dialog diagnostyczny |
+Win10 WebM Cut jest aplikacją C# / .NET 10 / WPF. Nie korzysta z Electrona ani dodatkowego frameworka MVVM/DI. MainWindow odpowiada za widok i zdarzenia WPF, EditorController za stan, a wyspecjalizowane klasy za media, procesy i eksport.
 
-SPOOA ma wyłącznie robocze znaczenie przyjęte w audycie: jeden właściciel operacji,
-decyzji i cyklu życia. Nie deklarujemy zewnętrznego standardu o tym skrócie.
+~~~text
+MainWindow.xaml/.cs -> EditorController -> Timeline / CropEditor
+                              |               VideoGeometry
+                              +-> LatestOperation -> PreviewDecoder
+                              |                        |
+                              |                 LatestFramePresenter -> WPF
+                              +-> ExportValidation / ExportProfiles
+                                         |
+                                    FfmpegService
+                                         |
+                                    ToolProcess -> FFmpeg/FFprobe
+                                         |
+                                   ExportTransaction
+~~~
 
-## Stany edytora
+## Właściciele reguł
 
-`Empty → Loading → Ready ↔ Playing`; eksport przechodzi `Ready/Playing → Exporting
-→ Ready`; zamknięcie z dowolnego stanu przechodzi do terminalnego `Closing`.
-Błąd aktywnego otwarcia daje Empty, błąd podglądu Ready z komunikatem. Stary wynik
-nie może przejść do żadnego nowego stanu. Loading pozwala wybrać nowszy plik.
-Exporting blokuje otwieranie, edycję i odtwarzanie, pozostawiając Cancel.
-Closing blokuje wszystkie nowe operacje i callbacki do okna.
+| Obszar | Moduł |
+|---|---|
+| Stan edytora, otwieranie, eksport i zamykanie | EditorController |
+| Zdarzenia WPF, gesty myszy, focus, dialogi | MainWindow |
+| Metadane i strumienie | MediaProbe / VideoInfo / StreamInfo |
+| Żądana i przedstawiona pozycja, kroki nawigacji | Timeline / TimePolicy |
+| Jeden aktywny worker, nowsze żądania, generacje | LatestOperation |
+| Dekodowanie BGRA i PTS | PreviewDecoder |
+| Jeden slot oczekującej klatki | LatestFramePresenter |
+| Limit pikseli podglądu | PreviewSizing |
+| Obrót, SAR, współrzędne obrazu | VideoGeometry |
+| Szkic i zatwierdzony crop | CropEditor |
+| Stałe profile, lista kontenerów | ExportProfiles / Containers |
+| Walidacja czasu, profilu i wymiarów | ExportValidation |
+| Argumenty i uruchomienie eksportu | FfmpegService |
+| Plik roboczy i jego zatwierdzenie | ExportTransaction |
+| Tożsamość plików i rewizje Windows | FileRevision |
+| Proces, stdout, stderr, anulowanie, timeout | ToolProcess |
+| Narzędzia i dostępne enkodery/muksery | ToolResolver / ToolCapabilities |
+| Lokalny log, retencja, komunikaty diagnostyczne | AppLog |
 
-`CanOpen/CanEdit/CanPreview/CanMark/CanExport` należą do kontrolera. UI je wyświetla,
-a handlery kontrolera sprawdzają ponownie. `MainWindow` obsługuje jedynie dialogi,
-focus, gesty myszy, przypisanie wartości kontrolek i WritePixels do powtarzalnej
-bitmapy WPF. Szczegóły gestu (punkt zaczepienia/capture) są stanem widoku, nie
-konkurencyjną definicją kadru eksportu.
+## Stany i operacje
 
-## Generacje, kolejki i kończenie pracy
+~~~text
+Empty -> Loading -> Ready <-> Playing
+                   |
+                   +-> Exporting -> Ready
+Dowolny stan -> Closing
+~~~
 
-LatestOperation ma jeden worker, jeden aktywny CTS/Task i bounded channel rozmiaru
-1. `RequestLatest` zastępuje oczekujące żądanie. Otwieranie nowego pliku, zatrzymanie
-odtwarzania i zamknięcie natychmiast unieważniają prezentację i anulują operację.
-CTS jest zwalniany dopiero po `await` pracy oraz cleanup jej procesu/czytników.
-Stop można powtórzyć; nie ma .Wait/.Result na wątku UI.
+Nieudane otwarcie daje Empty, a błąd podglądu Ready z komunikatem. Kolejny wybór podczas Loading zastępuje poprzedni. W Exporting zablokowane są edycja, otwieranie i odtwarzanie, pozostaje anulowanie. Closing blokuje nowe operacje. EditorController sprawdza CanOpen, CanEdit, CanPreview, CanMark i CanExport, również gdy GUI wyświetla przycisk jako niedostępny.
 
-Dla kolejnych **nieruchomych** klatek tej samej sesji nie przerywa się bez końca
-aktywnego dekodera podczas autorepeat. Pozwala się zakończyć aktualnemu krótkiemu
-żądaniu, a jedno oczekujące przechowuje najnowszy cel. Generacja prezentacji i
-najnowsza generacja żądania są rozróżnione. Obraz aktywnej generacji ma prawdziwy
-PTS, ale nie kasuje napisu „Żądano” dla nowszego celu. Po zakończeniu aktywnego
-żądania startuje najnowsze, nie cała historia ruchów. Maksymalna częstotliwość
-startów wynika z nazwanej przerwy 80 ms; przerwa nie jest przesuwana przy każdym
-nowym zdarzeniu. Limit pojedynczego still/probe to 20 s, nie obietnica responsywności.
+## Podgląd, kolejki i wątki
 
-Publikacja obrazu ma inny zasób: jeden wymienialny slot klatki i jeden oczekujący
-callback Dispatchera. Starszy slot jest odrzucany. BGRA jest nową tablicą na klatkę,
-która po przekazaniu nigdy nie jest modyfikowana przez producenta. UI kopiuje ją do
-WriteableBitmap ponownie używanej do czasu zmiany rozmiaru. Świadomie nie wdrożono
-puli tablic bez pełnej umowy zwrotu. Nie ma nieograniczonej kolejki obrazów ani
-obietnicy zerowych alokacji. Przepustowość/model bajtów nie oznaczają working setu.
+LatestOperation ma jeden worker, jedną aktywną operację i jeden wymienny cel oczekujący. Każdy wniosek otrzymuje generację, aby spóźniony wynik nie zastępował nowego. Dla szybkiego przewijania scala się oczekujące cele; nieruchomy aktywny seek może się zakończyć przed nowszym. Minimalny odstęp startów wynosi 80 ms, bez resetowania go przy każdym zdarzeniu.
 
-PreviewDecoder łączy n-ty raw frame z n-tym wpisem showinfo. Weryfikuje indeks,
-monotoniczny czas i skończony zakres. Brak znacznika, ucięta/zerowa klatka lub niezerowy exit są błędem, nie sukcesem.
-Kolejka PTS ma pojemność 64; zapełnienie wstrzymuje czytnik stderr (back-pressure),
-a anulowanie przerywa także ten zapis. Nie gubimy czasów i nie przerywamy
-podglądu wyłącznie dlatego, że bardzo małe klatki wyprzedziły prezentację. Playback jest taktowany
-różnicami tych PTS na workerze, a nie osobnym zegarem w GUI. Przyjęcie obrazu i
-jego pozycji odbywa się w tej samej operacji Dispatchera. W pauzie nie ma timera.
+PreviewDecoder łączy surową klatkę BGRA z rzeczywistym PTS z showinfo, kontrolując kolejność i kompletność. Wspólna aktualizacja bitmapy i PTS odbywa się na Dispatcher WPF. LatestFramePresenter ma tylko jeden wymienny slot klatki i jeden oczekujący callback; nie utrzymuje kolejki wszystkich obrazów. Rozmiar podglądu jest limitowany do 960 × 540 i 518 400 pikseli. Playback kieruje się PTS, bez stałego timera odświeżania GUI w pauzie.
 
-## Procesy i awarie cleanup
+## Uruchamianie zewnętrznych procesów
 
-ToolProcess używa bezwzględnej ścieżki, ArgumentList i `UseShellExecute=false`.
-Stdout jest binarny w preview lub ograniczony do 2 Mi znaków w trybie tekstowym.
-Stderr: 48 końcowych wierszy, po maksymalnie 4096 znaków; jest czytany równocześnie.
-Anulowanie tylko sygnalizuje workerowi — nie wykonuje Kill synchronicznie w UI.
-Błąd któregokolwiek czytnika, token lub deadline rozpoczyna zatrzymanie niezależnie
-od tego, czy Task.WhenAll już się skończył. Sukces wymaga zakończenia obu odczytów,
-procesu i kodu wyjścia 0.
+ToolResolver znajduje FFmpeg/FFprobe w tools obok EXE lub w bezwzględnych katalogach PATH. ToolCapabilities sprawdza wymagane muksery, enkodery i formaty. ToolProcess używa ścieżki bezwzględnej, ArgumentList i UseShellExecute=false oraz równoczesnego odczytu stdout/stderr.
 
-Probe/still: 20 s; capability call: 15 s; oczekiwanie cleanup po żądaniu Kill: 5 s.
-Te liczby są polityką kodu, nie pomiarem lub twardym limitem wywołań systemowych.
-Po przekroczeniu cleanup nie zwalnia się zasobów nadal używanych przez czytniki.
-Przejmuje je obserwator końcowy, a dalsze uruchamianie narzędzi zostaje zablokowane
-w tej instancji aplikacji. Błędy są logowane, przy zamknięciu pojawia się ostrzeżenie.
-Nie gwarantujemy, że Windows zawsze pozwoli zakończyć zewnętrzny proces.
+Limity zwykłych odczytów metadanych/nieruchomych klatek wynoszą 20 s, operacji capabilities 15 s, a oczekiwania cleanup po sygnale zakończenia 5 s. Nie są to gwarantowane limity systemu operacyjnego. Przy niepotwierdzonym zakończeniu procesu kolejne użycie narzędzi może zostać zablokowane w tej instancji.
 
-## Eksport i ograniczenia
+## Eksport i bezpieczeństwo
 
-Snapshot tworzy się **przed** modalnym wyborem wyniku. Zawiera niezmienne źródło
-z rewizją, zakres, zatwierdzony crop i kanoniczny profil. Kontroler kończy preview
-przed uruchomieniem eksportu. Dysk/probe/encoder pracują poza UI. Preflight,
-argumenty, kontrola metadanych i rewizji są częścią callbacku transakcji.
-Zamiana wyniku ma ostatni punkt anulowania przed Move/Replace; nie ma kasowania
-celu w obsłudze wyjątku lub Cancel. Szczegóły: [EXPORT-CONTRACT](EXPORT-CONTRACT.md).
+Przed dialogiem zapisu tworzony jest niezmienny ExportRequest. Praca kodeka i plików jest poza wątkiem UI. ExportTransaction tworzy tymczasowy plik wynikowy w katalogu celu, weryfikuje jego podstawowe właściwości i kontrolę źródła, a następnie przenosi lub zastępuje cel. Odrzucone albo anulowane operacje nie powinny usuwać poprzedniego pliku docelowego. Granice gwarancji i zasady jakości są w [Kontrakcie eksportu](EXPORT-CONTRACT.md).
 
-## Dowody i nieweryfikowane granice
+## Rozwijanie projektu
 
-[Raport napraw](https://github.com/KeyffMS/win10-webm-cut/blob/fix/audit-remediation-2026-10-26/docs/remediation/2026-10-26/README.md) wiąże kryteria issues z symbolami
-i wynikami modeli. Modele nie implementują WPF, .NET CancellationTokenSource,
-FFmpeg, systemu plików ani schedulera Windows. Sprawdzenie składni XML nie jest
-kompilacją XAML/C#; nie stwierdzamy działania wiązań, PTS, dostępności, DPI lub
-jakości wyjścia bez osobnej weryfikacji runtime.
+Reguły profile/kodeki utrzymuj w ExportProfiles i ExportValidation, geometrię w VideoGeometry, lokalizację narzędzi w ToolResolver, a cykl życia procesów w ToolProcess. Zmieniając zachowanie, aktualizuj równolegle odpowiednie strony dokumentacji PL i EN. Nie dubluj logiki pomiędzy MainWindow a kontrolerem.

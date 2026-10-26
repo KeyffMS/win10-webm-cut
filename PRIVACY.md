@@ -1,23 +1,21 @@
-# Dane lokalne i prywatność
+# Prywatność / Privacy
 
-Aplikacja otwiera wskazane lokalne pliki, odczytuje ich metadane i uruchamia lokalne
-FFmpeg/FFprobe. Nie ma kont, telemetrii, analityki, zdalnego crash-reportingu,
-automatycznej aktualizacji ani funkcji przesyłania filmu. Kod narzędzi zewnętrznych
-pochodzi z instalacji użytkownika; nie należy uruchamiać nieznanych binariów.
+## Polski
 
-Lokalne logi, ścieżki i komunikaty mogą zawierać nazwy konta, folderów, plików,
-metadane materiału i fragmenty stderr. Format/retencja/lokalizacja należą do
-[DIAGNOSTICS](docs/DIAGNOSTICS.md). Pliki robocze wyniku są tworzone w wybranym
-katalogu docelowym, nie wysyłane nigdzie. Po awarii mogą wymagać ręcznej oceny
-przed usunięciem. Nie kasuj źródła ani poprawnego wyniku jako „cleanup”.
+Win10 WebM Cut przetwarza **wskazane lokalne pliki**. Odczytuje metadane przez FFprobe, wyświetla podgląd przez FFmpeg i zapisuje wyniki przez lokalny proces FFmpeg. Nie posiada kont użytkownika, telemetrii, analityki, zdalnego raportowania awarii, automatycznych aktualizacji ani funkcji przesyłania filmów do serwera.
 
-Brak telemetrii nie oznacza automatycznej anonimowości ręcznie publikowanego logu.
-Przycisk kopiowania redaguje rozpoznane ścieżki pomocniczo. Przed publikacją
-sprawdź całość; usuń nazwy, dane osobowe, sekrety i treść, której nie chcesz ujawnić.
-Zaznaczony tekst i ręczne Ctrl+C nie stosują redakcji. Nie publikuj dumpów/filmów
-bez świadomej zgody osób, których dane lub wizerunek zawierają.
+**Dane na dysku:** log jest zapisywany w %LOCALAPPDATA%\Win10WebmCut\Logs\app.log i może zawierać ścieżki, metadane, nazwy plików, fragmenty błędów i stack trace. Pliki robocze eksportu tworzone są w katalogu docelowym i po awarii mogą pozostać. Nie usuwaj pliku źródłowego ani prawidłowego wyniku jako elementu sprzątania.
 
-`.gitignore` ogranicza przypadkowe dodawanie logów, dumpów, mediów i binariów.
-Nie chroni plików już śledzonych ani wymuszonego `git add -f`. Procedura pakowania
-korzysta z jawnej listy plików, a nie archiwizowania całego katalogu użytkownika.
-Nie ma automatycznego kasowania lub przesyłania logów w związku ze zgłoszeniem błędu.
+**Udostępnianie diagnostyki:** funkcja „Kopiuj bez ścieżek” tylko częściowo redaguje dane; nie gwarantuje anonimizacji. Ręczne kopiowanie zaznaczonego tekstu nie redaguje go. Przed publikacją issue sprawdź każdą informację i usuń dane osobowe, sekrety, nazwy prywatnych plików oraz materiały wideo.
+
+Program uruchamia **zewnętrzne binaria** FFmpeg/FFprobe z zainstalowanej lokalizacji. Używaj wyłącznie zaufanych plików. [Diagnostyka](docs/DIAGNOSTICS.md) · [Wymagania](docs/REQUIREMENTS.md).
+
+## English
+
+Win10 WebM Cut processes **user-selected local files**. It reads metadata using FFprobe, provides FFmpeg-based preview and exports using a local FFmpeg process. It has no user accounts, telemetry, analytics, remote crash reporting, automatic updates or built-in video upload.
+
+**On-disk data:** logs are written to %LOCALAPPDATA%\Win10WebmCut\Logs\app.log and may include paths, metadata, filenames, error excerpts and stack traces. Export working files are created in the destination directory and may survive system failure. Never delete source media or a valid destination as a cleanup shortcut.
+
+**Sharing diagnostics:** the “Kopiuj bez ścieżek” (Copy without paths) feature performs limited redaction and **does not guarantee anonymization**. Manual copying is verbatim. Review every excerpt before posting an issue; remove personal information, secrets, private filenames and media.
+
+The application executes **external FFmpeg/FFprobe binaries** from the user's installation; use trusted versions only. [Diagnostics](docs/en/DIAGNOSTICS.md) · [Requirements](docs/en/REQUIREMENTS.md).

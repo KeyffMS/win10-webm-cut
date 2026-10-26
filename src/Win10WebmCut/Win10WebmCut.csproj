@@ -14,14 +14,20 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include="../../README.md;../../LICENSE;../../PRIVACY.md;../../CHANGELOG.md;../../THIRD-PARTY-NOTICES.md">
+    <Content Include="../../README.md;../../LICENSE;../../PRIVACY.md;../../THIRD-PARTY-NOTICES.md">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="../../docs/BUILD.md;../../docs/USER-GUIDE.md;../../docs/EXPORT-CONTRACT.md;../../docs/ARCHITECTURE.md;../../docs/DIAGNOSTICS.md;../../docs/PACKAGING.md;../../docs/package-manifest.json">
+    <Content Include="../../docs/*.md;../../docs/package-manifest.json">
       <Link>docs/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="../../docs/en/*.md">
+      <Link>docs/en/%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

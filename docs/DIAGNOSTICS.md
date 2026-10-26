@@ -1,70 +1,48 @@
-# Diagnostyka lokalna
+# Diagnostyka i zgłoszenia problemów
 
-Przycisk **Diagnostyka** pokazuje wersję aplikacji z assembly, uruchomiony runtime,
-system i architekturę procesu, zapamiętane ścieżki narzędzi oraz lokalizację logu.
-Wersje FFmpeg/FFprobe są odczytywane przy preflight eksportu; przed nim widnieje
-„jeszcze nie odczytano”, a nie zgadywana wersja. SDK nie jest odpytywany przez EXE.
+[Spis dokumentacji](README.md) · [English](en/DIAGNOSTICS.md)
 
-## Log
+## Okno diagnostyki
 
-Domyślna lokalizacja:
+Przycisk **Diagnostyka** pokazuje wersję aplikacji, aktywny runtime .NET, system/architekturę procesu, rozpoznane lokalizacje ffmpeg.exe/ffprobe.exe, lokalizację dziennika i ostatni status. Numery wersji FFmpeg/FFprobe pojawiają się po odczycie ich możliwości przed eksportem; brak odczytu wcześniej nie oznacza błędu.
 
-```text
+## Lokalny dziennik
+
+~~~text
 %LOCALAPPDATA%\Win10WebmCut\Logs\app.log
-```
+~~~
 
-`AppLog` zapisuje UTC, rodzaj zdarzenia, identyfikator operacji i PID narzędzia.
-Wyjątki są zapisywane z ToString (stack trace), do limitu wpisu 65 536 znaków.
-Plik ma limit polityki 1 MiB z trzema rotowanymi kopiami `app.log.1`–`.3`.
-Limity dotyczą zapisów aplikacji, nie równoczesnej modyfikacji przez inny proces.
-Błąd zapisu logu nie wywołuje rekurencyjnego logowania ani drugiej awarii; informacja
-o niedostępności pojawia się w diagnostyce. Stderr narzędzia jest ograniczony,
-nie jest bezlimitowym trwałym zapisem każdej klatki.
+Log zawiera czas UTC, typ zdarzenia, identyfikator operacji i, w odpowiednich miejscach, PID narzędzia. Wyjątki mogą zawierać stack trace, nazwy plików oraz ograniczony stderr narzędzi. Limit rozmiaru aktywnego pliku to około **1 MiB** z trzema rotowanymi kopiami (app.log.1–.3). Lokalny log nie jest automatycznie wysyłany.
 
-Przykłady dla użytkownika Windows, niewykonywane przez audyt/model:
+Odczyt ostatnich wpisów z PowerShell:
 
-```powershell
+~~~powershell
 $log = Join-Path $env:LOCALAPPDATA 'Win10WebmCut\Logs\app.log'
 Get-Content -LiteralPath $log -Tail 150
-```
+~~~
 
-Log konsoli pozostaje możliwością pomocniczą:
+Dodatkowe logowanie wyjścia uruchomienia:
 
-```powershell
-dotnet run --project .\src\Win10WebmCut\Win10WebmCut.csproj -c Release 2>&1 |
-    Tee-Object -FilePath .\crash-console.log
-```
+~~~powershell
+dotnet run --project .\src\Win10WebmCut\Win10WebmCut.csproj -c Release 2>&1 | Tee-Object -FilePath .\crash-console.log
+~~~
 
-Kod nie maskuje wszystkich wyjątków przez `Handled=true`. Nieobsłużona awaria
-jest zapisywana i pozostaje awarią, zamiast wymuszać kontynuację w niespójnym stanie.
+## Objawy i działania
 
-## Rozróżnianie problemów
-
-| Informacja | Znaczenie i działanie |
+| Objaw | Sprawdzenie |
 |---|---|
-| Brak narzędzia | Sprawdź wybraną ścieżkę według BUILD; sama obecność w repo/tools nie wystarcza |
-| Brak enkodera/muksera/formatu FFV1 | Wybrany build nie deklaruje wymaganej możliwości; bez automatycznej zmiany jakości |
-| Błąd probe / zmiana rewizji | Zakończ nagrywanie/modyfikowanie źródła i otwórz je ponownie |
-| Błąd PTS / zero klatek | Dane podglądu niespójne lub format nieobsługiwany; nie jest to potwierdzenie uszkodzenia każdego pliku |
-| Timeout | Upłynął nazwany limit danej operacji, nie dowód błędu systemu |
-| Cleanup zablokował operacje | Nie potwierdzono końca narzędzia; sprawdź PID w logu i zakończ instancję aplikacji. Nie uruchamiaj pętli kolejnych eksportów |
-| Odmowa cropu/profilu | Sprawdź ograniczenia geometryczne i kontrakt, nie obchodź walidacji przez ręczne zmiany argumentów |
+| Nie znaleziono narzędzi | tools przy EXE lub pełne katalogi PATH, nie automatycznie repo/tools |
+| Brak encodera/muksera | ffmpeg -encoders i ffmpeg -muxers; build musi wspierać dany profil |
+| Nie widać podglądu HDR | Jest wyłączony bez tone mappingu; sprawdź profil Copy |
+| Błąd otwarcia | Czy zapis źródła jest zakończony i ffprobe odczytuje metadane |
+| Crop jest odrzucany | Parzyste X/Y/W/H, minimum 2 × 2, poprawne granice, zastosowane zmiany |
+| Eksport niedostępny | Nieukończony crop, wybrany profil, brak narzędzi, trwająca operacja |
+| Błąd PTS/dekodowania | Nieobsługiwany lub niespójny strumień w źródle |
+| Timeout albo blokada cleanup | Sprawdź log/PID; zamknij instancję zamiast uruchamiać kolejne zadania |
+| Nie można zapisać wyniku | Uprawnienia, brak miejsca, blokada przez inny proces lub właściwości dysku/udziału |
 
-## Zgłoszenie problemu
+## Zgłaszanie problemów
 
-Opisz czynność, czy błąd jest powtarzalny, wybrany profil oraz zakres. Dołącz wersje
-z diagnostyki i **zredagowany** fragment logu dla identyfikatora operacji. Nie
-potrzeba automatycznie całego filmu, pełnej ścieżki użytkownika ani zrzutu pamięci.
-Nie wysyłaj sekretów, mediów ani prywatnych logów do publicznego issue.
+[GitHub Issues](https://github.com/KeyffMS/win10-webm-cut/issues): podaj Windows i architekturę, wersję aplikacji/.NET, wersje FFmpeg/FFprobe, profil, kroki odtworzenia, oczekiwane zachowanie i rzeczywisty rezultat. Jeśli potrzebny log, wyślij **tylko sprawdzony, zredagowany fragment**.
 
-„Kopiuj bez ścieżek” usuwa rozpoznane ścieżki drive/UNC, ale jest pomocą, nie
-certyfikowaną anonimizacją. Nazwy plików bez ścieżek i inne dane mogą pozostać.
-Ręczne kopiowanie zaznaczonego tekstu kopiuje tekst dosłownie. Zawsze przeczytaj
-wynik przed wysłaniem. Szczegóły: [PRIVACY](../PRIVACY.md).
-
-## Wersje i historia
-
-Źródłem wersji aplikacji jest `.csproj`, a opisem zmian [CHANGELOG](../CHANGELOG.md).
-Polityka SDK/narzędzi należy do [BUILD](BUILD.md), pochodzenie dystrybuowanych
-binarnych składników do [PACKAGING](PACKAGING.md). Logowanie nie kontaktuje się
-z usługami chmurowymi i nie sprawdza samoczynnie aktualizacji.
+„Kopiuj bez ścieżek” usuwa wybrane wzorce ścieżek, ale **nie gwarantuje anonimizacji**. Zwykłe kopiowanie tekstu zachowuje go dosłownie. Nie publikuj filmów, dumpów, prywatnych ścieżek ani sekretów. Zobacz [Prywatność](../PRIVACY.md) i [FAQ](FAQ.md).

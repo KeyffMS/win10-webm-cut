@@ -1,22 +1,21 @@
-# Składniki i dystrybucja
+# Licencje i składniki zewnętrzne / Third-party notices
 
-Kod Win10 WebM Cut: MIT, Copyright (c) 2026 KeyffMS — pełny tekst w LICENSE.
-Paleta nawiązuje do projektu SightAdapt tego samego właściciela. Nowa implementacja
-nie kopiuje kodu LosslessCut i nie opisuje tej aplikacji jako jego binarnego forka.
+## Polski
 
-Projekt korzysta z .NET / WPF. Nie deklaruje dodatkowych zależności NuGet, lecz
-publikacja self-contained zawiera składniki runtime i jego zależności. Dokładne
-wersje, licencje i notices muszą odpowiadać użytemu runtime oraz Windows Desktop
-Runtime, nie dowolnemu tekstowi pobranemu z nowszej wersji projektu.
+**Win10 WebM Cut:** kod źródłowy jest udostępniony na warunkach licencji [MIT](LICENSE), Copyright (c) 2026 KeyffMS.
 
-FFmpeg/FFprobe to zewnętrzne narzędzia, domyślnie niedostarczane z repozytorium.
-Ich warianty kompilacji, zewnętrzne biblioteki i opcje mogą zmieniać obowiązki
-redistribucji. Nie należy zakładać jednej licencji dla każdego builda FFmpeg.
-Do wariantu paczki z narzędziami trzeba dołączyć informacje o pochodzeniu,
-konfiguracji, wersjach, notices i sposobie spełnienia wymagań źródłowych
-właściwego buildu. Ten dokument nie zastępuje pełnych licencji ani oferty źródeł.
+**.NET / WPF:** aplikacja korzysta z Microsoft .NET i Windows Presentation Foundation. Publikacja self-contained dołącza składniki runtime .NET i Windows Desktop. Dystrybucja musi zawierać licencje/notices odpowiadające **faktycznie użytej** wersji runtime i jego zależnościom.
 
-Procedura [PACKAGING](docs/PACKAGING.md) wymaga dostarczenia rzeczywistych danych
-i dokumentów przed przygotowaniem folderu paczki. Nie pobiera ich automatycznie,
-nie fabrykuje potwierdzeń i nie certyfikuje zgodności prawnej. W tym zakresie nie
-zbudowano, nie pobrano ani nie opublikowano żadnego binarium.
+**FFmpeg/FFprobe:** to zewnętrzne narzędzia, standardowo niedołączane do źródeł. Licencje konkretnej paczki FFmpeg zależą od konfiguracji buildu, skompilowanych bibliotek i zasad redystrybucji. Nie wszystkie buildy FFmpeg mają identyczną licencję. Jeśli dołączasz binaria do paczki, zadbaj o rzeczywiste dane pochodzenia, wersję, konfigurację, notices i wymagane źródła/ofertę źródłową dla tego buildu.
+
+Repozytorium nie pobiera automatycznie licencji ani nie deklaruje, że sama obecność tego pliku rozstrzyga zgodność prawną. Instrukcja: [Pakowanie](docs/PACKAGING.md).
+
+## English
+
+**Win10 WebM Cut:** source code is licensed under [MIT](LICENSE), Copyright (c) 2026 KeyffMS.
+
+**.NET / WPF:** the application uses Microsoft .NET and Windows Presentation Foundation. Self-contained publishing bundles .NET and Windows Desktop runtime components. Redistributed packages must include legal notices and licenses matching the **actual runtime build** and dependencies.
+
+**FFmpeg/FFprobe:** external tools are not bundled with the source by default. Licensing depends on each FFmpeg distribution's build configuration, linked libraries and applicable redistribution obligations. Not all FFmpeg builds have the same license. When distributing these executables, supply actual provenance, versions, configuration, required notices and source compliance information for the specific build.
+
+The repository does not automatically download license texts and this document alone is **not** a legal compliance certification. See [Packaging](docs/en/PACKAGING.md).
